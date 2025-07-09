@@ -13,7 +13,7 @@ npm install
 ```
 TOGETHER_API_KEY=your_together_api_key_here
 TRIPXPLO_EMAIL=tour@tripmilestone.com
-TRIPXPLO_PASSWORD=p2qu8W
+TRIPXPLO_PASSWORD=tripxplo_admin_password
 ```
 
 3. Run the development server:
