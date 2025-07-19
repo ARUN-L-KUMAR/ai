@@ -1,6 +1,6 @@
-import Together from "together-ai";
+import OpenAI from "openai";
 
-const together = new Together();
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -8,12 +8,12 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const response = await together.chat.completions.create({
+    const response = await openai.chat.completions.create({
       messages: [{
         role: 'system',
         content: 'Generate a complete welcome message for TripXplo AI. Include: 1) Friendly greeting with emojis 2) "Here are some ways I can help:" 3) Exactly 5 bullet points: packages by destination, pricing details, browse by interests, explore destinations, find hotels/activities. Keep it concise and complete. End with "What would you like to explore today?"'
       }],
-      model: "deepseek-ai/DeepSeek-V3",
+      model: "gpt-4o",
       temperature: 0.9,
       max_tokens: 400
     });

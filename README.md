@@ -1,6 +1,6 @@
 # TripXplo AI - Travel Assistant
 
-A chat-based AI travel assistant built with Next.js 14, TypeScript, and Mistral AI.
+A chat-based AI travel assistant built with Next.js 14, TypeScript, and OpenAI GPT.
 
 ## Setup
 
@@ -11,7 +11,7 @@ npm install
 
 2. Configure environment variables in `.env.local`:
 ```
-TOGETHER_API_KEY=your_together_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
 TRIPXPLO_EMAIL=tour@tripmilestone.com
 TRIPXPLO_PASSWORD=tripxplo_admin_password
 ```
@@ -38,7 +38,7 @@ If the Ai is not working, check the console for errors.
 
 - **Frontend**: Next.js 14 with App Router, TailwindCSS
 - **Backend**: Next.js API routes
-- **AI**: Together AI with function calling
+- **AI**: OpenAI GPT with function calling
 - **API**: TripXplo REST API integration
 
 ## Project Structure
@@ -51,7 +51,7 @@ If the Ai is not working, check the console for errors.
 │   └── page.tsx            # Home page
 ├── lib/
 │   ├── ai/                 # AI integration
-│   │   ├── ai.ts      # Mistral AI client
+│   │   ├── ai.ts      # OpenAI GPT client
 │   │   └── tools.ts        # Tool definitions
 │   └── api/                # API clients
 │       └── tripxplo.ts     # TripXplo API client

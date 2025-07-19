@@ -1,4 +1,4 @@
-import Together from "together-ai";
+import OpenAI from "openai";
 import { tools, executeTool } from './tools';
 
 interface Message {
@@ -6,11 +6,11 @@ interface Message {
   content: string;
 }
 
-const together = new Together();
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function formatToolResult(toolResult: string): Promise<string> {
   try {
-    const response = await together.chat.completions.create({
+    const response = await openai.chat.completions.create({
       messages: [
         {
           role: 'system',
@@ -21,7 +21,7 @@ async function formatToolResult(toolResult: string): Promise<string> {
           content: `Format this travel data: ${toolResult}`
         }
       ],
-      model: "deepseek-ai/DeepSeek-V3",
+      model: "gpt-4o",
       temperature: 0.3,
       max_tokens: 4000
     });
@@ -38,13 +38,13 @@ export async function processWithai(messages: Message[]): Promise<string> {
   console.log('📝 Input messages:', messages.map(m => ({ role: m.role, content: m.content.substring(0, 100) })));
   
   try {
-    console.log('🤖 Calling Together AI...');
-    const response = await together.chat.completions.create({
+    console.log('🤖 Calling OpenAI...');
+    const response = await openai.chat.completions.create({
       messages: [{
         role: 'system',
         content: 'You are TripXplo AI. MUST respond with JSON tool call. For packages: {"tool_call": {"tool_name": "get_packages", "arguments": {"search": "location"}}}. For pricing: {"tool_call": {"tool_name": "get_package_pricing", "arguments": {"packageId": "ID", "startDate": "YYYY-MM-DD", "noAdult": 2, "noChild": 0, "noRoomCount": 1, "noExtraAdult": 0}}}. NO markdown, ONLY JSON.'
       }, ...messages],
-      model: "deepseek-ai/DeepSeek-V3",
+      model: "gpt-4o",
       temperature: 0.1,
       max_tokens: 500
     });
@@ -113,7 +113,7 @@ export async function processWithai(messages: Message[]): Promise<string> {
     console.log('🔄 Returning AI message as-is');
     return messageContent;
   } catch (error) {
-    console.error('💥 Together AI error:', error);
+    console.error('💥 OpenAI error:', error);
     return "I'm TripXplo AI, your travel assistant! I can help you find amazing travel packages.";
   }
 }
