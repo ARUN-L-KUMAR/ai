@@ -1,153 +1,210 @@
-function parseMarkdown(text: string): string {
-  // Step 1: Normalize all bullet types to • and fix heading issues with emojis
-  const normalized = text
-    .replace(/^(#{1,6})(\s*)([\u{1F300}-\u{1F6FF}])/gu, (_match, hashes, space, emoji) => `${hashes} ${emoji}`)
-    .replace(/^\s*[-*+](\s|$)/gm, '• ')  // Handle -, *, + bullets
-    .replace(/^\s*•(\s|$)/gm, '• ');
+'use client';
 
-  const lines = normalized.split('\n');
-  const result: string[] = [];
-  let currentList: string[] = [];
-  let inList = false;
-  let currentListType: 'ul' | 'ol' = 'ul';
+import { useState } from 'react';
+import { Bot, User, Copy, ThumbsUp, ThumbsDown, Check, Calendar, MapPin, Users, DollarSign, Star } from 'lucide-react';
+import TripCard from './TripCard';
 
-  const isBulletPoint = (line: string): boolean => {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('• ')) return true;
-    if (/^\d+\.\s/.test(trimmed)) return true;
-    const emojiPattern = /^[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]\s/u;
-    return emojiPattern.test(trimmed);
-  };
-
-  const extractBulletContent = (line: string): string => {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('• ')) return trimmed.substring(2);
-    const numberedMatch = trimmed.match(/^\d+\.\s(.*)$/);
-    if (numberedMatch) return numberedMatch[1];
-    const emojiMatch = trimmed.match(/^([\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}])\s(.*)$/u);
-    if (emojiMatch) return emojiMatch[2];
-    return trimmed;
-  };
-
-  const processInlineMarkdown = (text: string): string => {
-    return text
-      .replace(/\*\*\*\*(.*?)\*\*\*\*/g, '<strong><em>$1</em></strong>')
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<em>$1</em>')
-      .replace(/(?<!_)_([^_]+?)_(?!_)/g, '<em>$1</em>')
-      .replace(/`(.*?)`/g, '<code class="bg-gray-200 px-1 rounded">$1</code>')
-      .replace(/~~(.*?)~~/g, '<del>$1</del>')
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-600 hover:underline">$1</a>')
-      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="max-w-full h-auto">');
-  };
-
-  const getListType = (line: string): 'ul' | 'ol' => {
-    return /^\d+\.\s/.test(line.trim()) ? 'ol' : 'ul';
-  };
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (isBulletPoint(trimmed)) {
-      const content = extractBulletContent(trimmed);
-      const listType = getListType(trimmed);
-
-      if (inList && currentListType !== listType && currentList.length > 0) {
-        const listClass = currentListType === 'ol' ? 'list-decimal pl-5 space-y-1 mb-4' : 'list-disc pl-5 space-y-1 mb-4';
-        result.push(`<${currentListType} class="${listClass}">${currentList.join('')}</${currentListType}>`);
-        currentList = [];
-      }
-
-      currentListType = listType;
-      const processedContent = processInlineMarkdown(content);
-      currentList.push(`<li>${processedContent}</li>`);
-      inList = true;
-    } else {
-      if (inList && currentList.length > 0) {
-        const listClass = currentListType === 'ol' ? 'list-decimal pl-5 space-y-1 mb-4' : 'list-disc pl-5 space-y-1 mb-4';
-        result.push(`<${currentListType} class="${listClass}">${currentList.join('')}</${currentListType}>`);
-        currentList = [];
-        inList = false;
-      }
-
-      if (trimmed) {
-        if (/^#{6}\s+.+/.test(trimmed)) {
-          result.push(`<h6 class="text-xs font-bold mt-2 mb-1">${processInlineMarkdown(trimmed.substring(7).trim())}</h6>`);
-        } else if (/^#{5}\s+.+/.test(trimmed)) {
-          result.push(`<h5 class="text-xs font-bold mt-2 mb-1">${processInlineMarkdown(trimmed.substring(6).trim())}</h5>`);
-        } else if (/^#{4}\s+.+/.test(trimmed)) {
-          result.push(`<h4 class="text-sm font-bold mt-3 mb-1">${processInlineMarkdown(trimmed.substring(5).trim())}</h4>`);
-        } else if (/^#{3}\s+.+/.test(trimmed)) {
-          result.push(`<h3 class="text-md font-bold mt-4 mb-2">${processInlineMarkdown(trimmed.substring(4).trim())}</h3>`);
-        } else if (/^#{2}\s+.+/.test(trimmed)) {
-          result.push(`<h2 class="text-lg font-bold mt-5 mb-3">${processInlineMarkdown(trimmed.substring(3).trim())}</h2>`);
-        } else if (/^#{1}\s+.+/.test(trimmed)) {
-          result.push(`<h1 class="text-xl font-bold mt-6 mb-4">${processInlineMarkdown(trimmed.substring(2).trim())}</h1>`);
-        } else if (["---", "***", "___"].includes(trimmed)) {
-          result.push('<hr class="my-4 border-gray-300">');
-        } else if (trimmed.startsWith('> ')) {
-          result.push(`<blockquote class="border-l-4 border-gray-300 pl-4 italic mb-4">${processInlineMarkdown(trimmed.substring(2))}</blockquote>`);
-        } else if (trimmed.startsWith('```')) {
-          const codeLines = [trimmed];
-          let j = i + 1;
-          while (j < lines.length && !lines[j].trim().startsWith('```')) {
-            codeLines.push(lines[j]);
-            j++;
-          }
-          if (j < lines.length) codeLines.push(lines[j]);
-          const language = trimmed.substring(3).trim();
-          const codeContent = codeLines.slice(1, -1).join('\n');
-          result.push(`<pre class="bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4"><code class="language-${language}">${codeContent}</code></pre>`);
-          i = j;
-        } else {
-          result.push(`<p class="mb-2">${processInlineMarkdown(trimmed)}</p>`);
-        }
-      } else {
-        if (result.length > 0 && !result[result.length - 1].includes('mb-')) {
-          result.push('<div class="mb-4"></div>');
-        }
-      }
-    }
-  }
-
-  if (inList && currentList.length > 0) {
-    const listClass = currentListType === 'ol' ? 'list-decimal pl-5 space-y-1 mb-4' : 'list-disc pl-5 space-y-1 mb-4';
-    result.push(`<${currentListType} class="${listClass}">${currentList.join('')}</${currentListType}>`);
-  }
-
-  return result.join('');
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+  index?: number;
 }
 
-
-
-// Updated ChatMessage component
 interface ChatMessageProps {
-  message: {
-    role: 'user' | 'assistant';
-    content: string;
-  };
+  message: Message;
+  index?: number;
 }
 
-export default function ChatMessage({ message }: ChatMessageProps) {
+export default function ChatMessage({ message, index }: ChatMessageProps) {
+  const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
-  
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
+  };
+
+  // Function to parse trip packages from content
+  const parsePackages = (content: string) => {
+    const packageRegex = /\*\*(.*?)\*\*[\s\S]*?🏨\s*(.*?)\s*\|[\s\S]*?📍\s*(.*?)\s*\|[\s\S]*?⏰\s*(.*?)\s*\|[\s\S]*?💰\s*₹([\d,]+)/g;
+    const packages = [];
+    let match;
+
+    while ((match = packageRegex.exec(content)) !== null) {
+      packages.push({
+        name: match[1].trim(),
+        hotels: match[2].trim(),
+        destination: match[3].trim(),
+        duration: match[4].trim(),
+        price: match[5].replace(/,/g, '')
+      });
+    }
+
+    return packages;
+  };
+
+  // Function to render formatted content
+  const renderContent = () => {
+    let content = message.content;
+    const packages = parsePackages(content);
+
+    // If packages are found, render them as cards
+    if (packages.length > 0 && !isUser) {
+      // Remove the package details from content to avoid duplication
+      const cleanContent = content.replace(/\*\*(.*?)\*\*[\s\S]*?💰\s*₹[\d,]+/g, '').trim();
+      
+      return (
+        <div className="space-y-6">
+          {cleanContent && (
+            <div className="prose prose-sm max-w-none text-gray-700">
+              {formatText(cleanContent)}
+            </div>
+          )}
+          <div className="grid gap-4 mt-6">
+            {packages.map((pkg, idx) => (
+              <TripCard
+                key={idx}
+                name={pkg.name}
+                destination={pkg.destination}
+                duration={pkg.duration}
+                price={parseInt(pkg.price)}
+                hotels={pkg.hotels}
+                imageUrl={`https://images.unsplash.com/800x600/?travel,${pkg.destination.toLowerCase().replace(/\s+/g, ',')}`}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="prose prose-sm max-w-none text-gray-700">
+        {formatText(content)}
+      </div>
+    );
+  };
+
+  // Function to format text with markdown-like syntax
+  const formatText = (text: string) => {
+    const lines = text.split('\n');
+    return lines.map((line, idx) => {
+      if (line.trim() === '') return <br key={idx} />;
+      
+      // Headers
+      if (line.startsWith('## ')) {
+        return <h2 key={idx} className="text-lg font-semibold text-gray-900 mt-4 mb-2">{line.slice(3)}</h2>;
+      }
+      if (line.startsWith('### ')) {
+        return <h3 key={idx} className="text-base font-medium text-gray-800 mt-3 mb-2">{line.slice(4)}</h3>;
+      }
+      
+      // Bold text
+      if (line.includes('**')) {
+        const parts = line.split('**');
+        return (
+          <p key={idx} className="mb-2">
+            {parts.map((part, partIdx) => 
+              partIdx % 2 === 0 ? part : <strong key={partIdx} className="font-semibold text-gray-900">{part}</strong>
+            )}
+          </p>
+        );
+      }
+      
+      // Bullet points
+      if (line.trim().startsWith('•')) {
+        return <li key={idx} className="ml-4 mb-1 text-gray-700">{line.trim().slice(1).trim()}</li>;
+      }
+      
+      // Regular text
+      return <p key={idx} className="mb-2 text-gray-700">{line}</p>;
+    });
+  };
+
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div
-        className={`max-w-3xl px-4 py-2 rounded-lg ${
-          isUser
-            ? 'bg-blue-600 text-white'
-            : 'bg-gray-100 text-gray-800'
-        }`}
-      >
-        {isUser ? (
-          <div className="whitespace-pre-wrap">{message.content}</div>
-        ) : (
-          <div
-            dangerouslySetInnerHTML={{ __html: parseMarkdown(message.content) }}
-          />
-        )}
+    <div className={`flex gap-4 ${isUser ? 'flex-row-reverse' : 'flex-row'} animate-fadeIn`}>
+      {/* Avatar */}
+      <div className={`flex-shrink-0 ${isUser ? 'ml-4' : 'mr-4'}`}>
+        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shadow-lg ${
+          isUser 
+            ? 'bg-gradient-to-r from-blue-600 to-indigo-600' 
+            : 'bg-gradient-to-r from-indigo-600 to-purple-600'
+        }`}>
+          {isUser ? (
+            <User className="w-5 h-5 text-white" />
+          ) : (
+            <Bot className="w-5 h-5 text-white" />
+          )}
+        </div>
+      </div>
+
+      {/* Message Content */}
+      <div className={`flex-1 max-w-4xl ${isUser ? 'text-right' : 'text-left'}`}>
+        {/* Header with name and timestamp */}
+        <div className={`flex items-center gap-2 mb-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
+          <div className={`flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+            <span className="text-sm font-semibold text-gray-900">
+              {isUser ? 'You' : 'TripXplo AI'}
+            </span>
+            {!isUser && (
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-xs text-gray-500">Online</span>
+              </div>
+            )}
+          </div>
+          <span className="text-xs text-gray-500">
+            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+
+        {/* Message Bubble */}
+        <div className={`relative group ${isUser ? 'ml-12' : 'mr-12'}`}>
+          <div className={`p-6 rounded-3xl shadow-lg border ${
+            isUser 
+              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-100' 
+              : 'bg-white/90 backdrop-blur text-gray-800 border-gray-100'
+          }`}>
+            {isUser ? (
+              <p className="text-white leading-relaxed">{message.content}</p>
+            ) : (
+              renderContent()
+            )}
+          </div>
+
+          {/* Action buttons for AI messages */}
+          {!isUser && (
+            <div className="flex items-center gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={copyToClipboard}
+                className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-800 transition-all flex items-center gap-1"
+                title="Copy message"
+              >
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                <span className="text-xs">{copied ? 'Copied!' : 'Copy'}</span>
+              </button>
+              
+              <button
+                className="p-2 rounded-xl bg-gray-100 hover:bg-green-100 text-gray-600 hover:text-green-600 transition-all"
+                title="Good response"
+              >
+                <ThumbsUp className="w-4 h-4" />
+              </button>
+              
+              <button
+                className="p-2 rounded-xl bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-600 transition-all"
+                title="Poor response"
+              >
+                <ThumbsDown className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
