@@ -160,6 +160,30 @@ async function formatToolResult(toolResult: string): Promise<string> {
   }
 }
 
+// Helper to extract options from previous assistant message
+function extractOptionsFromMessage(message: string, regex: RegExp): string[] {
+  const options: string[] = [];
+  let match;
+  while ((match = regex.exec(message)) !== null) {
+    options.push(match[1]);
+  }
+  return options;
+}
+
+// Helper to extract package type/interest from user input
+function extractPackageTypeFromContent(content: string): string | undefined {
+  const lower = content.toLowerCase();
+  if (lower.includes('family')) return 'family';
+  if (lower.includes('adventure')) return 'adventure';
+  if (lower.includes('romantic')) return 'romantic';
+  if (lower.includes('beach')) return 'beach';
+  if (lower.includes('vacation')) return 'family';
+  if (lower.includes('getaway')) return 'beach';
+  if (lower.includes('honeymoon')) return 'romantic';
+  // Add more mappings as needed
+  return undefined;
+}
+
 export async function processWithai(messages: Message[]): Promise<string> {
   console.log('🚀 Starting processWithai...');
   console.log('📝 Input messages:', messages.map(m => ({ role: m.role, content: m.content.substring(0, 100) })));
@@ -171,85 +195,157 @@ export async function processWithai(messages: Message[]): Promise<string> {
 
   const userContent = lastUserMessage.content.toLowerCase();
   const state = extractConversationState(messages);
-  
+
+  // Extract package type/interest from initial user request if present
+  let initialPackageType = extractPackageTypeFromContent(userContent);
+  // If not found in initial, check previous state
+  if (!initialPackageType && state.packageType) initialPackageType = state.packageType;
+
   console.log('🎯 Current conversation state:', state);
 
   // Step 1: User asks for packages - Start guided conversation
   if (state.step === 'initial' && isPackageRequest(userContent)) {
-    return `✨ **I'd love to help you find the perfect trip!** 🌍
-
-To get started, could you tell me where you'd like to go?
-
-You can choose from these popular destinations or type your own:
-
-🏖️ **1.** Goa
-🏔️ **2.** Kashmir  
-🌴 **3.** Bali
-🏙️ **4.** Dubai
-✍️ **Other** (type your destination)
-
-*Just type the number or destination name!*`;
+    return `✨ **I'd love to help you find the perfect trip!** 🌍\n\nTo get started, could you tell me where you'd like to go?\n\nYou can choose from these popular destinations or type your own:\n\n🏖️ **1.** Goa\n🏔️ **2.** Kashmir  \n🌴 **3.** Bali\n🏙️ **4.** Dubai\n✍️ **Other** (type your destination)\n\n*Just type the number or destination name!*`;
   }
 
   // Step 2: User selected destination - Ask for duration
   if (state.step === 'destination') {
-    const destination = lastUserMessage.content;
-    return `🎯 **Great choice!** ${destination.includes('1') ? 'Goa' : destination.includes('2') ? 'Kashmir' : destination.includes('3') ? 'Bali' : destination.includes('4') ? 'Dubai' : destination} sounds amazing!
+    let destination = lastUserMessage.content.trim();
+    // Map numeric input to destination name
+    if (destination === '1') destination = 'Goa';
+    else if (destination === '2') destination = 'Kashmir';
+    else if (destination === '3') destination = 'Bali';
+    else if (destination === '4') destination = 'Dubai';
 
-How many days are you planning for this trip?
+    // If the user changed the destination, reset the package type filter
+    let prevDestination = state.destination ? state.destination.trim().toLowerCase() : '';
+    let currDestination = destination.trim().toLowerCase();
+    let effectivePackageType = initialPackageType;
+    if (prevDestination && prevDestination !== currDestination) {
+      effectivePackageType = undefined;
+    }
 
-📅 **1.** 2-3 Days (Quick Getaway)
-📅 **2.** 4-5 Days (Perfect Break) 
-📅 **3.** 6-7 Days (Full Experience)
-📅 **4.** 8+ Days (Extended Vacation)
-✍️ **Other** (type your preferred duration)
+    let dynamicDurations = [];
+    let dynamicTypes = [];
+    // Build absolute URL for server-side fetch
+    const baseUrl =
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    try {
+      // Call the new API endpoint to get available durations and package types
+      let url = `${baseUrl}/api/package-options?destination=${encodeURIComponent(destination)}`;
+      if (effectivePackageType) {
+        url += `&packageType=${encodeURIComponent(effectivePackageType)}`;
+      }
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        dynamicDurations = data.durations || [];
+        dynamicTypes = data.packageTypes || [];
+      }
+    } catch (err) {
+      console.error('Failed to fetch dynamic options:', err);
+    }
 
-*Choose a number or tell me your ideal trip length!*`;
+    if (dynamicDurations.length > 0) {
+      // Build dynamic duration options
+      const durationOptions = dynamicDurations.map((d: string | number, i: number) => `📅 **${i + 1}.** ${d} Days`).join('\n');
+      return `🎯 **Great choice!** ${destination} sounds amazing!\n\nHow many days are you planning for this trip?\n\n${durationOptions}\n✍️ **Other** (type your preferred duration)\n\n*Choose a number or tell me your ideal trip length!*`;
+    } else {
+      // No durations for this destination and type
+      let typeMsg = effectivePackageType ? ` for "${effectivePackageType}" packages` : '';
+      return `😕 Sorry, there are no available durations${typeMsg} in ${destination}.\n\nTry another type or destination!`;
+    }
+    // fallback to static options if dynamic not available (should not reach here)
   }
 
   // Step 3: User selected duration - Ask for package type
   if (state.step === 'duration') {
-    const duration = lastUserMessage.content;
-    return `⏰ **Perfect timing!** ${duration.includes('1') ? '2-3 days' : duration.includes('2') ? '4-5 days' : duration.includes('3') ? '6-7 days' : duration.includes('4') ? '8+ days' : duration} will be wonderful!
+    const durationInput = lastUserMessage.content.trim();
+    let destination = state.destination || '';
+    // Map numeric input to destination name
+    if (destination === '1') destination = 'Goa';
+    else if (destination === '2') destination = 'Kashmir';
+    else if (destination === '3') destination = 'Bali';
+    else if (destination === '4') destination = 'Dubai';
 
-Now, what type of package experience are you looking for?
+    // Extract dynamic durations from previous assistant message
+    const prevAssistantMsg = messages.filter(m => m.role === 'assistant').pop()?.content || '';
+    // Match lines like: 📅 **1.** 4 Days
+    const durationRegex = /\*\*\d+\.\*\* ([\d]+) Days/g;
+    const dynamicDurations = extractOptionsFromMessage(prevAssistantMsg, durationRegex);
 
-🥇 **Gold** - Premium comfort & experiences
-🥈 **Silver** - Great value with quality amenities  
-🏆 **Premium** - Luxury & exclusive experiences
-✍️ **Custom** (tell me your preferences)
+    let selectedDuration = durationInput;
+    const userIndex = parseInt(durationInput, 10) - 1;
+    if (!isNaN(userIndex) && dynamicDurations[userIndex] !== undefined) {
+      selectedDuration = dynamicDurations[userIndex];
+    }
 
-*Almost there! Just pick your preferred package type.*`;
+    let dynamicTypes: (string | number)[] = [];
+    const baseUrl =
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    try {
+      // Call the new API endpoint to get available package types for the destination and type
+      let url = `${baseUrl}/api/package-options?destination=${encodeURIComponent(destination)}`;
+      if (initialPackageType) {
+        url += `&packageType=${encodeURIComponent(initialPackageType)}`;
+      }
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        dynamicTypes = data.packageTypes || [];
+      }
+    } catch (err) {
+      console.error('Failed to fetch dynamic package types:', err);
+    }
+
+    if (dynamicTypes.length > 0) {
+      // Build dynamic package type options
+      const typeOptions = dynamicTypes.map((t: string | number, i: number) => `🏷️ **${i + 1}.** ${t}`).join('\n');
+      return `⏰ **Perfect timing!** ${selectedDuration} days will be wonderful!\n\nNow, what type of package experience are you looking for?\n\n${typeOptions}\n✍️ **Custom** (tell me your preferences)\n\n*Almost there! Just pick your preferred package type.*`;
+    }
+    // fallback to static options if dynamic not available
+    return `⏰ **Perfect timing!** ${selectedDuration} days will be wonderful!\n\nNow, what type of package experience are you looking for?\n\n🥇 **Gold** - Premium comfort & experiences\n🥈 **Silver** - Great value with quality amenities  \n🏆 **Premium** - Luxury & exclusive experiences\n✍️ **Custom** (tell me your preferences)\n\n*Almost there! Just pick your preferred package type.*`;
   }
 
   // Step 4: User selected package type - Now fetch packages
   if (state.step === 'packageType') {
-    const packageType = lastUserMessage.content;
-    
-    // Extract the collected information
+    const packageTypeInput = lastUserMessage.content.trim();
     let destination = state.destination || '';
     let duration = state.duration || '';
-    
-    console.log(`🔍 Raw values - destination: "${destination}", duration: "${duration}"`);
-    
-    // Map user selections to actual values
-    if (destination.includes('1') || destination.toLowerCase().includes('goa')) destination = 'Goa';
-    else if (destination.includes('2') || destination.toLowerCase().includes('kashmir')) destination = 'Kashmir';
-    else if (destination.includes('3') || destination.toLowerCase().includes('bali')) destination = 'Bali';
-    else if (destination.includes('4') || destination.toLowerCase().includes('dubai')) destination = 'Dubai';
-    
-    let days = 5; // default to a common duration
-    if (duration.includes('1')) days = 3;
-    else if (duration.includes('2')) days = 5;
-    else if (duration.includes('3')) days = 7;
-    else if (duration.includes('4')) days = 10;
-    else {
+    // Map numeric input to destination name
+    if (destination === '1') destination = 'Goa';
+    else if (destination === '2') destination = 'Kashmir';
+    else if (destination === '3') destination = 'Bali';
+    else if (destination === '4') destination = 'Dubai';
+
+    // Extract dynamic durations from previous assistant message (for correct days value)
+    const prevAssistantMsg = messages.filter(m => m.role === 'assistant').pop()?.content || '';
+    const durationRegex = /\*\*\d+\.\*\* ([\d]+) Days/g;
+    const dynamicDurations = extractOptionsFromMessage(prevAssistantMsg, durationRegex);
+    let days = duration;
+    const durationIndex = parseInt(duration, 10) - 1;
+    if (!isNaN(durationIndex) && dynamicDurations[durationIndex] !== undefined) {
+      days = dynamicDurations[durationIndex];
+    } else {
+      // fallback: try to parse as a number directly
       const match = duration.match(/(\d+)/);
-      if (match) days = parseInt(match[1]);
+      if (match) days = match[1];
     }
 
-    console.log(`🎪 Fetching packages for: ${destination}, ${days} days, ${packageType}`);
-    
+    // Extract dynamic package types from previous assistant message
+    const typeRegex = /🏷️ \*\*\d+\.\*\* ([^\n]+)/g;
+    const dynamicTypes = extractOptionsFromMessage(prevAssistantMsg, typeRegex);
+    let selectedType = packageTypeInput;
+    const typeIndex = parseInt(packageTypeInput, 10) - 1;
+    if (!isNaN(typeIndex) && dynamicTypes[typeIndex] !== undefined) {
+      selectedType = dynamicTypes[typeIndex];
+    }
+
+    console.log(`🔍 Raw values - destination: "${destination}", duration: "${days}"`);
+    console.log(`🎪 Fetching packages for: ${destination}, ${days} days, ${selectedType}`);
+
     try {
       // Try to get packages - first with exact search, then fallback to general search
       let toolResult = await executeTool('get_packages', {
