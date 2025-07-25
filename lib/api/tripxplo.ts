@@ -86,3 +86,20 @@ export async function getPackages(search?: string): Promise<any[]> {
   
   return allPackages;
 }
+
+export async function getPackageById(id: string): Promise<any | null> {
+  const token = await getAccessToken();
+  const response = await fetch(`${PACKAGE_ENDPOINT}/${id}`, {
+    headers: {
+      ...DEFAULT_HEADERS,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch package by ID: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.result || null;
+}

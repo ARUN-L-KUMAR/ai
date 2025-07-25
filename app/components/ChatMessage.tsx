@@ -32,7 +32,7 @@ export default function ChatMessage({ message, index }: ChatMessageProps) {
 
   // Function to parse trip packages from content
   const parsePackages = (content: string) => {
-    const packageRegex = /\*\*(.*?)\*\*[\s\S]*?🏨\s*(.*?)\s*\|[\s\S]*?📍\s*(.*?)\s*\|[\s\S]*?⏰\s*(.*?)\s*\|[\s\S]*?💰\s*₹([\d,]+)/g;
+    const packageRegex = /\*\*(.*?)\*\*[\s\S]*?🏨\s*(.*?)\s*\|[\s\S]*?📍\s*(.*?)\s*\|[\s\S]*?⏰\s*(.*?)\s*\|[\s\S]*?💰\s*₹([\d,]+)[\s\S]*?ID:\s*([A-Z0-9-]+)/g;
     const packages = [];
     let match;
 
@@ -42,7 +42,8 @@ export default function ChatMessage({ message, index }: ChatMessageProps) {
         hotels: match[2].trim(),
         destination: match[3].trim(),
         duration: match[4].trim(),
-        price: match[5].replace(/,/g, '')
+        price: match[5].replace(/,/g, ''),
+        packageId: match[6].trim()
       });
     }
 
@@ -75,6 +76,8 @@ export default function ChatMessage({ message, index }: ChatMessageProps) {
                 price={parseInt(pkg.price)}
                 hotels={pkg.hotels}
                 imageUrl={`https://images.unsplash.com/800x600/?travel,${pkg.destination.toLowerCase().replace(/\s+/g, ',')}`}
+                onViewDetails={() => console.log('View details from ChatMessage')}
+                packageId={pkg.packageId}
               />
             ))}
           </div>
@@ -158,7 +161,7 @@ export default function ChatMessage({ message, index }: ChatMessageProps) {
             )}
           </div>
           <span className="text-xs text-gray-500">
-            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
 

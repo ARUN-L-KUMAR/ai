@@ -13,6 +13,8 @@ interface TripCardProps {
   reviews?: number;
   nights?: number;
   days?: number;
+  onViewDetails: () => void;
+  packageId: string;
 }
 
 export default function TripCard({ 
@@ -24,10 +26,17 @@ export default function TripCard({
   rating = 4.5,
   reviews = 124,
   nights = 0,
-  days = 0
+  days = 0,
+  onViewDetails,
+  packageId
 }: TripCardProps) {
   const [isLiked, setIsLiked] = useState(false);
   const [imageError, setImageError] = useState(false);
+
+  const handleViewDetailsClick = () => {
+    console.log('Viewing details for package:', packageId);
+    onViewDetails();
+  };
 
   const handleImageError = () => {
     setImageError(true);
@@ -44,6 +53,9 @@ export default function TripCard({
   };
 
   const formatPrice = (amount: number) => {
+    if (!amount || amount <= 0) {
+      return 'Price on request';
+    }
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
@@ -158,7 +170,10 @@ export default function TripCard({
             </div>
           </div>
           
-          <button className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold rounded-2xl transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl">
+          <button 
+            onClick={handleViewDetailsClick}
+            className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold rounded-2xl transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl"
+          >
             View Details
           </button>
         </div>

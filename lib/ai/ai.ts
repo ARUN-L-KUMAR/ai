@@ -1,191 +1,94 @@
 import OpenAI from "openai";
-import { tools, executeTool } from './tools';
 
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
-interface ConversationState {
-  step: 'initial' | 'destination' | 'duration' | 'plan' | 'complete';
-  destination?: string;
-  duration?: string;
-  plan?: string;
+interface TripIntent {
+  intent: 'get_packages' | 'ask_general' | 'unknown';
+  destination: string | null;
+  duration: number | null;
+  planType: string | null;
 }
+
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Extract conversation state from message history
-function extractConversationState(messages: Message[]): ConversationState {
-  const state: ConversationState = { step: 'initial' };
-  
-  // Find the last assistant question to determine current step
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    
-    if (message.role === 'assistant') {
-      // If last assistant message asked for package type
-      if (message.content.includes('what type of package experience')) {
-        state.step = 'plan';
-        
-        // Find destination and duration from the conversation
-        const allMessages = messages.slice(0, i); // Messages before this question
-        const userMessages = allMessages.filter(m => m.role === 'user');
-        
-        // Look for destination - should be the user response after "where you'd like to go"
-        for (let j = 0; j < allMessages.length - 1; j++) {
-          if (allMessages[j].role === 'assistant' && allMessages[j].content.includes('where you\'d like to go')) {
-            if (j + 1 < allMessages.length && allMessages[j + 1].role === 'user') {
-              state.destination = allMessages[j + 1].content;
-              break;
-            }
-          }
-        }
-        
-        // Look for duration - should be the user response after "How many days"
-        for (let j = 0; j < allMessages.length - 1; j++) {
-          if (allMessages[j].role === 'assistant' && allMessages[j].content.includes('How many days')) {
-            if (j + 1 < allMessages.length && allMessages[j + 1].role === 'user') {
-              state.duration = allMessages[j + 1].content;
-              break;
-            }
-          }
-        }
-        break;
-      }
-      // If last assistant message asked for duration
-      else if (message.content.includes('How many days')) {
-        state.step = 'duration';
-        
-        // Find destination from the conversation
-        const allMessages = messages.slice(0, i);
-        for (let j = 0; j < allMessages.length - 1; j++) {
-          if (allMessages[j].role === 'assistant' && allMessages[j].content.includes('where you\'d like to go')) {
-            if (j + 1 < allMessages.length && allMessages[j + 1].role === 'user') {
-              state.destination = allMessages[j + 1].content;
-              break;
-            }
-          }
-        }
-        break;
-      }
-      // If last assistant message asked for destination
-      else if (message.content.includes('where you\'d like to go')) {
-        state.step = 'destination';
-        break;
-      }
-    }
-  }
-  
-  console.log('🔍 Extracted state:', state);
-  return state;
-}
-
-// Check if user is asking for packages
-function isPackageRequest(content: string): boolean {
-  const packageKeywords = [
-    'package', 'packages', 'trips', 'tours', 'holidays', 'show me packages',
-    'what packages', 'tour list', 'available packages', 'travel packages',
-    'vacation packages', 'holiday packages', 'show me the package', 'show package',
-    'show the option', 'show options', 'show me options', 'travel options',
-    'trip options', 'holiday options', 'vacation options', 'tour options'
-  ];
-  
-  // Also check for common patterns
-  const lowerContent = content.toLowerCase();
-  
-  // Direct package requests
-  if (packageKeywords.some(keyword => lowerContent.includes(keyword))) {
-    return true;
-  }
-  
-  // Pattern matching for "show me/show the + any travel related word"
-  const showPatterns = [
-    /show\s+(me\s+)?(the\s+)?(package|trip|tour|holiday|vacation|option)/i,
-    /what\s+(package|trip|tour|holiday|vacation|option)/i,
-    /available\s+(package|trip|tour|holiday|vacation|option)/i
-  ];
-  
-  return showPatterns.some(pattern => pattern.test(content));
-}
-
-async function formatToolResult(toolResult: string): Promise<string> {
+// Analyze user intent using GPT
+async function analyzeUserIntent(messages: Message[]): Promise<TripIntent> {
   try {
+    const conversationHistory = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+    
     const response = await openai.chat.completions.create({
       messages: [
         {
           role: 'system',
-          content: `You are TripXplo AI - create neat, short, and beautiful responses.
+          content: `You are an expert travel intent analyzer. Analyze the conversation history and extract structured information about the user's travel intent.
 
-🎯 **RESPONSE STYLE:**
-- Keep responses concise and elegant (within 300 words)
-- Use meaningful emojis to enhance readability
-- Use natural, friendly tone with professional formatting
-- Avoid clutter — clean layout with proper line breaks
+🎯 **YOUR TASK:**
+Analyze the entire conversation and return a JSON object with the following structure:
+{
+  "intent": "get_packages" | "ask_general" | "unknown",
+  "destination": string | null,
+  "duration": number | null,
+  "planType": string | null
+}
 
-📝 **FORMAT PACKAGES AS:**
+🧠 **INTENT CLASSIFICATION:**
+- "get_packages": User wants to find/book travel packages, trips, tours, holidays, or is asking about specific travel options
+- "ask_general": User is asking general travel questions, advice, or information
+- "unknown": Intent is unclear or unrelated to travel
 
-✨ Found [X] perfect matches for you!
+📍 **EXTRACTION RULES:**
+- destination: Extract city/place names (e.g., "Goa", "Kashmir", "Manali", "Dubai")
+- duration: Extract number of days/nights (convert "4-day" to 4, "3 nights" to 3)
+- planType: Extract trip type/purpose (e.g., "honeymoon", "family", "adventure", "romantic", "business")
 
-🌍 [Package Name]
-📅 Duration: X Nights / Y Days
-📍 Destination: Location Name
-💸 Starting From: ₹XX,XXX per person
-🎡 Highlights: Key attractions and activities
-💖 Perfect For: Families, couples, adventure seekers
-🔖 Package ID: PACKAGECODE
+🔍 **EXAMPLES:**
+- "I want to go on a 4-day honeymoon" → {"intent": "get_packages", "destination": null, "duration": 4, "planType": "honeymoon"}
+- "Show me packages for Manali" → {"intent": "get_packages", "destination": "Manali", "duration": null, "planType": null}
+- "What's the weather like in Goa?" → {"intent": "ask_general", "destination": "Goa", "duration": null, "planType": null}
+- "Maybe Manali" (in context of destination question) → {"intent": "get_packages", "destination": "Manali", "duration": null, "planType": null}
 
-[Repeat for up to 3 top packages]
-
-🎯 **RULES:**
-- Max 3 packages per response
-- One-line descriptions under Highlights
-- Use emojis for visual clarity
-- Keep tone warm, friendly, and natural — like a helpful travel planner`
+Return ONLY the JSON object, no additional text.`
         },
         {
           role: 'user',
-          content: `Make this travel data neat, short and beautiful: ${toolResult}`
+          content: `Analyze this conversation:\n\n${conversationHistory}`
         }
       ],
       model: "gpt-4o",
-      temperature: 0.6,
-      max_tokens: 500
+      temperature: 0.1,
+      max_tokens: 200
     });
 
-    return response.choices?.[0]?.message?.content ?? toolResult;
+    const content = response.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      return { intent: 'unknown', destination: null, duration: null, planType: null };
+    }
+
+    try {
+      const parsed = JSON.parse(content);
+      return {
+        intent: parsed.intent || 'unknown',
+        destination: parsed.destination || null,
+        duration: parsed.duration || null,
+        planType: parsed.planType || null
+      };
+    } catch (parseError) {
+      console.error('🔍 Intent parsing error:', parseError);
+      return { intent: 'unknown', destination: null, duration: null, planType: null };
+    }
   } catch (error) {
-    console.error('🎨 Format error:', error);
-    return toolResult;
+    console.error('🔍 Intent analysis error:', error);
+    return { intent: 'unknown', destination: null, duration: null, planType: null };
   }
 }
 
-// Helper to extract options from previous assistant message
-function extractOptionsFromMessage(message: string, regex: RegExp): string[] {
-  const options: string[] = [];
-  let match;
-  while ((match = regex.exec(message)) !== null) {
-    options.push(match[1]);
-  }
-  return options;
-}
-
-// Helper to extract package type/interest from user input
-function extractPlanFromContent(content: string): string | undefined {
-  const lower = content.toLowerCase();
-  if (lower.includes('family')) return 'family';
-  if (lower.includes('adventure')) return 'adventure';
-  if (lower.includes('romantic')) return 'romantic';
-  if (lower.includes('beach')) return 'beach';
-  if (lower.includes('vacation')) return 'family';
-  if (lower.includes('getaway')) return 'beach';
-  if (lower.includes('honeymoon')) return 'romantic';
-  // Add more mappings as needed
-  return undefined;
-}
 
 export async function processWithai(messages: Message[]): Promise<string> {
-  console.log('🚀 Starting processWithai...');
+  console.log('🚀 Starting processWithai with GPT-powered intent analysis...');
   console.log('📝 Input messages:', messages.map(m => ({ role: m.role, content: m.content.substring(0, 100) })));
   
   const lastUserMessage = messages.filter(m => m.role === 'user').pop();
@@ -193,200 +96,132 @@ export async function processWithai(messages: Message[]): Promise<string> {
     return "✨ **TripXplo AI** - Your Travel Companion\n\nHello! I'm here to help you discover amazing travel experiences.\n\n💫 Ask me about destinations, packages, or travel tips!\n\n*What adventure are you dreaming of?* 🌍";
   }
 
-  const userContent = lastUserMessage.content.toLowerCase();
-  const state = extractConversationState(messages);
+  // Use GPT to analyze user intent and extract structured information
+  const intent = await analyzeUserIntent(messages);
+  console.log('🎯 Analyzed intent:', intent);
 
-  // Extract package type/interest from initial user request if present
-  let initialPlan = extractPlanFromContent(userContent);
-  // If not found in initial, check previous state
-  if (!initialPlan && state.plan) initialPlan = state.plan;
-
-  console.log('🎯 Current conversation state:', state);
-
-  // Step 1: User asks for packages - Start guided conversation
-  if (state.step === 'initial' && isPackageRequest(userContent)) {
-    return `✨ **I'd love to help you find the perfect trip!** 🌍\n\nTo get started, could you tell me where you'd like to go?\n\nYou can choose from these popular destinations or type your own:\n\n🏖️ **1.** Goa\n🏔️ **2.** Kashmir  \n🌴 **3.** Bali\n🏙️ **4.** Dubai\n✍️ **Other** (type your destination)\n\n*Just type the number or destination name!*`;
+  // Handle different intents
+  switch (intent.intent) {
+    case 'get_packages':
+      return await handlePackageRequest(intent, messages);
+    
+    case 'ask_general':
+      return await handleGeneralQuery(messages);
+    
+    default:
+      return await handleGeneralQuery(messages);
   }
+}
 
-  // Step 2: User selected destination - Ask for duration
-  if (state.step === 'destination') {
-    let destination = lastUserMessage.content.trim();
-    // Map numeric input to destination name
-    if (destination === '1') destination = 'Goa';
-    else if (destination === '2') destination = 'Kashmir';
-    else if (destination === '3') destination = 'Bali';
-    else if (destination === '4') destination = 'Dubai';
-
-    // If the user changed the destination, reset the package type filter
-    let prevDestination = state.destination ? state.destination.trim().toLowerCase() : '';
-    let currDestination = destination.trim().toLowerCase();
-    let effectivePlan = initialPlan;
-    if (prevDestination && prevDestination !== currDestination) {
-      effectivePlan = undefined;
-    }
-
-    let dynamicDurations = [];
-    let dynamicPlans = [];
-    // Build absolute URL for server-side fetch
-    const baseUrl =
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+// Handle package requests with smart conversation flow
+async function handlePackageRequest(intent: TripIntent, messages: Message[]): Promise<string> {
+  const { destination, duration, planType } = intent;
+  
+  // Check what information we have and what we need
+  const missingInfo = [];
+  if (!destination) missingInfo.push('destination');
+  if (!duration) missingInfo.push('duration');
+  
+  // If we have all required info, fetch packages
+  if (missingInfo.length === 0) {
+    console.log(`🎪 Fetching packages for: ${destination}, ${duration} days, ${planType || 'any'}`);
+    
     try {
-      // Call the new API endpoint to get available durations and package types
-      let url = `${baseUrl}/api/package-options?destination=${encodeURIComponent(destination)}`;
-      if (effectivePlan) {
-        url += `&plan=${encodeURIComponent(effectivePlan)}`;
-      }
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        dynamicDurations = data.durations || [];
-        dynamicPlans = data.plans || [];
-      }
-    } catch (err) {
-      console.error('Failed to fetch dynamic options:', err);
-    }
-
-    if (dynamicDurations.length > 0) {
-      // Build dynamic duration options
-      const durationOptions = dynamicDurations.map((d: string | number, i: number) => `📅 **${i + 1}.** ${d} Days`).join('\n');
-      return `🎯 **Great choice!** ${destination} sounds amazing!\n\nHow many days are you planning for this trip?\n\n${durationOptions}\n✍️ **Other** (type your preferred duration)\n\n*Choose a number or tell me your ideal trip length!*`;
-    } else {
-      // No durations for this destination and type
-      let planMsg = effectivePlan ? ` for "${effectivePlan}" plans` : '';
-      return `😕 Sorry, there are no available durations${planMsg} in ${destination}.\n\nTry another type or destination!`;
-    }
-    // fallback to static options if dynamic not available (should not reach here)
-  }
-
-  // Step 3: User selected duration - Ask for package type
-  if (state.step === 'duration') {
-    const durationInput = lastUserMessage.content.trim();
-    let destination = state.destination || '';
-    // Map numeric input to destination name
-    if (destination === '1') destination = 'Goa';
-    else if (destination === '2') destination = 'Kashmir';
-    else if (destination === '3') destination = 'Bali';
-    else if (destination === '4') destination = 'Dubai';
-
-    // Extract dynamic durations from previous assistant message
-    const prevAssistantMsg = messages.filter(m => m.role === 'assistant').pop()?.content || '';
-    // Match lines like: 📅 **1.** 4 Days
-    const durationRegex = /\*\*\d+\.\*\* ([\d]+) Days/g;
-    const dynamicDurations = extractOptionsFromMessage(prevAssistantMsg, durationRegex);
-
-    let selectedDuration = durationInput;
-    const userIndex = parseInt(durationInput, 10) - 1;
-    if (!isNaN(userIndex) && dynamicDurations[userIndex] !== undefined) {
-      selectedDuration = dynamicDurations[userIndex];
-    }
-
-    let dynamicPlans: (string | number)[] = [];
-    const baseUrl =
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-    try {
-      // Call the new API endpoint to get available package types for the destination and type
-      let url = `${baseUrl}/api/package-options?destination=${encodeURIComponent(destination)}`;
-      if (initialPlan) {
-        url += `&plan=${encodeURIComponent(initialPlan)}`;
-      }
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        dynamicPlans = data.plans || [];
-      }
-    } catch (err) {
-      console.error('Failed to fetch dynamic package types:', err);
-    }
-
-    if (dynamicPlans.length > 0) {
-      // Build dynamic package type options
-      const planOptions = dynamicPlans.map((t: string | number, i: number) => `🏷️ **${i + 1}.** ${t}`).join('\n');
-      return `⏰ **Perfect timing!** ${selectedDuration} days will be wonderful!\n\nNow, what type of package experience are you looking for?\n\n${planOptions}\n✍️ **Custom** (tell me your preferences)\n\n*Almost there! Just pick your preferred package type.*`;
-    }
-    // fallback to static options if dynamic not available
-    return `⏰ **Perfect timing!** ${selectedDuration} days will be wonderful!\n\nNow, what type of package experience are you looking for?\n\n🥇 **Gold** - Premium comfort & experiences\n🥈 **Silver** - Great value with quality amenities  \n🏆 **Premium** - Luxury & exclusive experiences\n✍️ **Custom** (tell me your preferences)\n\n*Almost there! Just pick your preferred package type.*`;
-  }
-
-  // Step 4: User selected package type - Now fetch packages
-  if (state.step === 'plan') {
-    const planInput = lastUserMessage.content.trim();
-    let destination = state.destination || '';
-    let duration = state.duration || '';
-    // Map numeric input to destination name
-    if (destination === '1') destination = 'Goa';
-    else if (destination === '2') destination = 'Kashmir';
-    else if (destination === '3') destination = 'Bali';
-    else if (destination === '4') destination = 'Dubai';
-
-    // Extract dynamic durations from previous assistant message (for correct days value)
-    const prevAssistantMsg = messages.filter(m => m.role === 'assistant').pop()?.content || '';
-    const durationRegex = /\*\*\d+\.\*\* ([\d]+) Days/g;
-    const dynamicDurations = extractOptionsFromMessage(prevAssistantMsg, durationRegex);
-    let days = duration;
-    const durationIndex = parseInt(duration, 10) - 1;
-    if (!isNaN(durationIndex) && dynamicDurations[durationIndex] !== undefined) {
-      days = dynamicDurations[durationIndex];
-    } else {
-      // fallback: try to parse as a number directly
-      const match = duration.match(/(\d+)/);
-      if (match) days = match[1];
-    }
-
-    // Extract dynamic package types from previous assistant message
-    const typeRegex = /🏷️ \*\*\d+\.\*\* ([^\n]+)/g;
-    const dynamicPlans = extractOptionsFromMessage(prevAssistantMsg, typeRegex);
-    let selectedPlan = planInput;
-    const planIndex = parseInt(planInput, 10) - 1;
-    if (!isNaN(planIndex) && dynamicPlans[planIndex] !== undefined) {
-      selectedPlan = dynamicPlans[planIndex];
-    }
-
-    console.log(`🔍 Raw values - destination: "${destination}", duration: "${days}"`);
-    console.log(`🎪 Fetching packages for: ${destination}, ${days} days, ${selectedPlan}`);
-
-    try {
-      // Try to get packages - first with exact search, then fallback to general search
-      let toolResult = await executeTool('get_packages', {
-        search: destination,
-        days: days
-      });
+      // Build API URL for packages
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 
+        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
       
-      // If no results, try without days filter
-      if (toolResult.includes('No packages') || toolResult.includes('Sorry, I couldn\'t fetch')) {
-        console.log('🔄 Retrying without days filter...');
-        toolResult = await executeTool('get_packages', {
-          search: destination,
-          days: 0 // 0 might mean "any duration"
-        });
+      let apiUrl = `${baseUrl}/api/packages?destination=${encodeURIComponent(destination!)}&duration=${duration!}`;
+      if (planType) {
+        apiUrl += `&plan=${encodeURIComponent(planType)}`;
       }
       
-      // If still no results, try with just general search
-      if (toolResult.includes('No packages') || toolResult.includes('Sorry, I couldn\'t fetch')) {
-        console.log('🔄 Retrying with general search...');
-        toolResult = await executeTool('get_packages', {
-          search: '',
-          days: days
-        });
+      const response = await fetch(apiUrl);
+      if (!response.ok) {
+        throw new Error(`API responded with status: ${response.status}`);
       }
       
-      if (toolResult.includes('Sorry, I couldn\'t fetch')) {
-        return "🔄 **Service Temporarily Unavailable**\n\nOur travel system is briefly offline. Please try again in a moment!\n\n✨ *Great travel experiences are worth the wait* 🌟";
+      const packages = await response.json();
+      
+      if (!packages || packages.length === 0) {
+        return await generateNoPackagesResponse(destination, duration, planType);
       }
       
-      const formattedResult = await formatToolResult(toolResult);
-      return formattedResult;
+      return await formatPackagesResponse(packages, destination, duration, planType);
       
     } catch (error) {
       console.error('💥 Package fetch error:', error);
       return "🔄 **Service Temporarily Unavailable**\n\nOur travel system is briefly offline. Please try again in a moment!\n\n✨ *Great travel experiences are worth the wait* 🌟";
     }
   }
+  
+  // Generate natural follow-up questions for missing information
+  return await generateFollowUpQuestion(intent, missingInfo, messages);
+}
 
-  // Handle other queries (non-package requests)
+// Generate natural follow-up questions when information is missing
+async function generateFollowUpQuestion(intent: TripIntent, missingInfo: string[], messages: Message[]): Promise<string> {
   try {
-    console.log('🤖 Processing non-package query...');
+    const conversationHistory = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+    
+    const response = await openai.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: `You are TripXplo AI, a friendly travel assistant. Generate a natural follow-up question to gather missing travel information.
+
+🎯 **CONTEXT:**
+- User wants travel packages
+- Current info: destination="${intent.destination}", duration=${intent.duration}, planType="${intent.planType}"
+- Missing info: ${missingInfo.join(', ')}
+
+🧠 **QUESTION GUIDELINES:**
+- Ask for the FIRST missing piece of information only
+- Use natural, conversational language
+- Include relevant emojis
+- Keep it friendly and engaging
+- If asking for destination, suggest 2-3 popular options
+- If asking for duration, suggest common trip lengths
+- Reference what they've already mentioned to show you're listening
+
+🎪 **EXAMPLES:**
+- Missing destination: "Lovely! A 4-day honeymoon sounds perfect! 💕 Do you have a destination in mind? Maybe somewhere romantic like Manali, Goa, or Kashmir?"
+- Missing duration: "Great choice! Manali is beautiful for a honeymoon! 🏔️ How many days are you planning for this romantic getaway?"
+- Missing both: "I'd love to help you plan the perfect honeymoon! 💕 Where are you thinking of going, and how many days would you like?"
+
+Generate ONLY the follow-up question, no additional text.`
+        },
+        {
+          role: 'user',
+          content: `Generate a follow-up question based on this conversation:\n\n${conversationHistory}`
+        }
+      ],
+      model: "gpt-4o",
+      temperature: 0.7,
+      max_tokens: 200
+    });
+
+    return response.choices?.[0]?.message?.content?.trim() || 
+      "I'd love to help you find the perfect trip! Could you tell me more about what you're looking for? 🌍";
+      
+  } catch (error) {
+    console.error('🔍 Follow-up question generation error:', error);
+    
+    // Fallback questions based on missing info
+    if (missingInfo.includes('destination')) {
+      return "I'd love to help you find the perfect trip! 🌍 Where would you like to go?";
+    } else if (missingInfo.includes('duration')) {
+      return `Great choice! ${intent.destination} sounds amazing! 🎯 How many days are you planning for this trip?`;
+    }
+    
+    return "I'd love to help you find the perfect trip! Could you tell me more about what you're looking for? 🌍";
+  }
+}
+
+// Handle general travel queries
+async function handleGeneralQuery(messages: Message[]): Promise<string> {
+  try {
+    console.log('🤖 Processing general travel query...');
     const response = await openai.chat.completions.create({
       messages: [{
         role: 'system',
@@ -396,21 +231,21 @@ export async function processWithai(messages: Message[]): Promise<string> {
 - Friendly, knowledgeable travel expert
 - Provide helpful travel information and guidance
 - Answer questions about destinations, travel tips, and general travel advice
-- If users ask about packages, guide them through our step-by-step process
+- If users ask about packages, guide them through our smart conversation flow
 - Maintain a warm, professional tone with appropriate emojis
 
 🧠 **RESPONSE GUIDELINES:**
-- Keep responses concise and helpful
+- Keep responses concise and helpful (under 300 words)
 - Use emojis to enhance readability
 - Provide actionable travel advice
-- If asked about specific packages/pricing, guide users to start our package selection process
+- If asked about specific packages/pricing, suggest they tell you their travel preferences
 - For general travel questions, provide informative and engaging answers
 
 🎪 **SPECIAL INSTRUCTIONS:**
-- If users ask about "packages", "tours", "trips" - guide them to start our selection process
+- If users ask about "packages", "tours", "trips" - encourage them to share their travel preferences
 - For destination questions, provide helpful information but suggest our package finder
-- Keep responses under 300 words
-- Always maintain the TripXplo brand voice - professional yet friendly`
+- Always maintain the TripXplo brand voice - professional yet friendly
+- End responses naturally without asking too many questions`
       }, ...messages],
       model: "gpt-4o",
       temperature: 0.6,
@@ -428,5 +263,85 @@ export async function processWithai(messages: Message[]): Promise<string> {
   } catch (error) {
     console.error('💥 OpenAI error:', error);
     return "✨ **TripXplo AI** - Your Travel Companion\n\nHello! I'm here to help you discover amazing travel experiences.\n\n💫 Ask me about destinations, packages, or travel tips!\n\n*What adventure are you dreaming of?* 🌍";
+  }
+}
+
+// Generate response when no packages are found
+async function generateNoPackagesResponse(destination: string | null, duration: number | null, planType: string | null): Promise<string> {
+  const planText = planType ? ` for ${planType} trips` : '';
+  const durationText = duration ? `${duration}-day ` : '';
+  const destinationText = destination || 'your chosen destination';
+  return `😕 **No packages found**\n\nSorry, I couldn't find any ${durationText}packages${planText} for ${destinationText} right now.\n\n🔄 **Try:**\n• Different duration (3-7 days are popular)\n• Different destination\n• Remove specific trip type filter\n\n💡 *Our inventory updates regularly, so check back soon!*`;
+}
+
+// Format packages response using GPT
+async function formatPackagesResponse(packages: any[], destination: string | null, duration: number | null, planType: string | null): Promise<string> {
+  try {
+    const packagesData = JSON.stringify({
+      packages: packages.slice(0, 3).map(pkg => ({
+        name: pkg.packageName,
+        destination: pkg.destinationName || destination,
+        days: pkg.noOfDays,
+        nights: pkg.noOfNight,
+        startFrom: pkg.startFrom,
+        hotels: pkg.hotelCount || 0,
+        activities: pkg.activityCount || 0,
+        packageId: pkg.packageId
+      })),
+      searchCriteria: { destination, duration, planType }
+    });
+
+    const response = await openai.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: `You are TripXplo AI - create beautiful, engaging package presentations.
+
+🎯 **RESPONSE STYLE:**
+- Keep responses concise and elegant (within 400 words)
+- Use meaningful emojis to enhance readability
+- Use natural, friendly tone with professional formatting
+- Create excitement about the travel options
+
+📝 **FORMAT PACKAGES AS:**
+
+✨ **Found [X] perfect matches for your ${duration}-day ${planType || ''} trip to ${destination}!**
+
+🌍 **[Package Name]**
+📅 Duration: X Nights / Y Days
+📍 Destination: Location Name
+💸 Starting From: ₹XX,XXX per person
+🎡 Highlights: Key attractions and activities
+🔖 Package ID: PACKAGECODE
+
+[Repeat for each package]
+
+🎯 **RULES:**
+- Show all provided packages (max 3)
+- Use emojis for visual clarity
+- Keep tone warm, friendly, and natural
+- Include package IDs for booking reference
+- End with a helpful call-to-action`
+        },
+        {
+          role: 'user',
+          content: `Format these travel packages beautifully: ${packagesData}`
+        }
+      ],
+      model: "gpt-4o",
+      temperature: 0.6,
+      max_tokens: 600
+    });
+
+    return response.choices?.[0]?.message?.content ?? 
+      `✨ Found ${packages.length} packages for your ${duration}-day trip to ${destination}!\n\n${packages.slice(0, 3).map(pkg => 
+        `🌍 ${pkg.packageName}\n📅 ${pkg.noOfDays} Days / ${pkg.noOfNight} Nights\n💸 From ₹${pkg.startFrom}\n🔖 ID: ${pkg.packageId}`
+      ).join('\n\n')}`;
+      
+  } catch (error) {
+    console.error('🎨 Format error:', error);
+    return `✨ Found ${packages.length} packages for your ${duration}-day trip to ${destination}!\n\n${packages.slice(0, 3).map(pkg => 
+      `🌍 ${pkg.packageName}\n📅 ${pkg.noOfDays} Days / ${pkg.noOfNight} Nights\n💸 From ₹${pkg.startFrom}\n🔖 ID: ${pkg.packageId}`
+    ).join('\n\n')}`;
   }
 }

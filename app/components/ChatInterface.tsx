@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import WelcomeIntro from './WelcomeIntro';
-import { Bot, Sparkles, MapPin, Globe, Heart } from 'lucide-react';
+import { Bot, Sparkles, MapPin, Globe, Heart, RotateCcw, ArrowLeft } from 'lucide-react';
 import TripCard from './TripCard';
 
 interface Message {
@@ -40,22 +40,95 @@ export default function ChatInterface() {
   const [packageResults, setPackageResults] = useState<any[]>([]);
   const [showPackageResults, setShowPackageResults] = useState(false);
 
+  type ConversationStep = 'welcome' | 'destination' | 'duration' | 'plan' | 'results' | 'chatting';
+  const [conversationStep, setConversationStep] = useState<ConversationStep>('welcome');
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(() => {
+    // Load messages from localStorage on initial render
+    const savedMessages = localStorage.getItem('chatMessages');
+    if (savedMessages) {
+      const parsedMessages = JSON.parse(savedMessages).map((msg: Message) => ({
+        ...msg,
+        timestamp: new Date(msg.timestamp),
+      }));
+      setMessages(parsedMessages);
+      setShowWelcome(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Save messages to localStorage whenever they change
+    if (messages.length > 0) {
+      localStorage.setItem('chatMessages', JSON.stringify(messages));
+    }
     scrollToBottom();
   }, [messages]);
 
   const handleQuickStart = (query: string) => {
     setShowWelcome(false);
+    setConversationStep('chatting');
     handleSendMessage(query);
+  };
+
+  const handleStartOver = () => {
+    setMessages([]);
+    localStorage.removeItem('chatMessages');
+    setIsLoading(false);
+    setShowWelcome(true);
+    setDestinationOptions([]);
+    setShowDestinationOptions(false);
+    setDurationOptions([]);
+    setShowDurationOptions(false);
+    setPlanOptions([]);
+    setShowPlanOptions(false);
+    setPackageResults([]);
+    setShowPackageResults(false);
+    setSelectedDestination(null);
+    setSelectedDuration(null);
+    setConversationStep('welcome');
+  };
+
+  const handleGoBack = () => {
+    const lastUserMessageIndex = messages.map(m => m.role).lastIndexOf('user');
+    if (lastUserMessageIndex === -1) return;
+
+    const lastUserMessage = messages[lastUserMessageIndex];
+    const previousMessages = messages.slice(0, lastUserMessageIndex);
+    const lastAssistantMessage = previousMessages.filter(m => m.role === 'assistant').pop();
+    
+    setMessages(previousMessages);
+
+    switch (conversationStep) {
+      case 'duration':
+        setShowDurationOptions(false);
+        setShowDestinationOptions(true);
+        setConversationStep('destination');
+        break;
+      case 'plan':
+        setShowPlanOptions(false);
+        setShowDurationOptions(true);
+        setConversationStep('duration');
+        break;
+      case 'results':
+        setShowPackageResults(false);
+        setShowPlanOptions(true);
+        setConversationStep('plan');
+        break;
+    }
   };
 
   // Fetch destinations when user asks for packages
   const fetchDestinations = async () => {
     setIsLoading(true);
+    setConversationStep('destination');
+    setMessages(prev => [
+      ...prev,
+      { role: 'assistant', content: "Of course! I can help with that. Where would you like to go?", timestamp: new Date() }
+    ]);
     try {
       const res = await fetch('/api/destinations');
       if (res.ok) {
@@ -78,6 +151,11 @@ export default function ChatInterface() {
   // Fetch durations for a destination
   const fetchDurations = async (destination: string) => {
     setIsLoading(true);
+    setConversationStep('duration');
+    setMessages(prev => [
+      ...prev,
+      { role: 'assistant', content: `Great choice! ${destination} is amazing. How many days are you planning for the trip?`, timestamp: new Date() }
+    ]);
     try {
       const res = await fetch(`/api/package-options?destination=${encodeURIComponent(destination)}`);
       if (res.ok) {
@@ -99,6 +177,11 @@ export default function ChatInterface() {
   // Fetch plans for a destination and duration
   const fetchPlans = async (destination: string, duration: number) => {
     setIsLoading(true);
+    setConversationStep('plan');
+    setMessages(prev => [
+      ...prev,
+      { role: 'assistant', content: `Perfect, a ${duration}-day trip it is! What kind of plan are you interested in?`, timestamp: new Date() }
+    ]);
     try {
       const res = await fetch(`/api/package-options?destination=${encodeURIComponent(destination)}&duration=${duration}`);
       if (res.ok) {
@@ -121,11 +204,26 @@ export default function ChatInterface() {
   // Fetch packages based on all selections
   const fetchFilteredPackages = async (destination: string, duration: number, plan: string) => {
     setIsLoading(true);
+    setConversationStep('results');
+    setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: `Searching for the best ${plan} packages in ${destination} for ${duration} days...`, timestamp: new Date() }
+    ]);
     try {
       const res = await fetch(`/api/packages?destination=${encodeURIComponent(destination)}&duration=${duration}&plan=${encodeURIComponent(plan)}`);
       let allPackages = [];
       if (res.ok) {
         allPackages = await res.json();
+        // Ensure price is a number
+        allPackages = allPackages.map((pkg: any) => {
+          let price = 0;
+          if (typeof pkg.startFrom === 'string') {
+            price = parseFloat(pkg.startFrom.replace(/[^0-9.-]+/g, '')) || 0;
+          } else if (typeof pkg.startFrom === 'number') {
+            price = pkg.startFrom;
+          }
+          return { ...pkg, startFrom: price };
+        });
       }
       setPackageResults(allPackages);
       setShowPackageResults(true);
@@ -141,7 +239,9 @@ export default function ChatInterface() {
   const handleSendMessage = async (content: string) => {
     if (showWelcome) {
       setShowWelcome(false);
+      setConversationStep('chatting');
     }
+    setShowPackageResults(false);
 
     // If user asks for packages, show destinations instead of sending to backend
    if (/(show|see|suggest|want|give|looking|plan|planning|explore|find|search|recommend).*(package|trip|travel|plan|option|itinerary|place|vacation)s?/i.test(content)) {
@@ -186,7 +286,7 @@ export default function ChatInterface() {
 
       const assistantMessage: Message = {
         role: 'assistant',
-        content: data.response || '� **Service Briefly Offline**\n\nPlease try again in a moment!\n\n✨ *Amazing trips are worth the wait* 🌟',
+        content: data.response || ' **Service Briefly Offline**\n\nPlease try again in a moment!\n\n✨ *Amazing trips are worth the wait* 🌟',
         timestamp: new Date()
       };
 
@@ -240,6 +340,45 @@ export default function ChatInterface() {
     }
   };
 
+  const handleViewDetails = async (packageId: string) => {
+    setIsLoading(true);
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: `Tell me more about package ${packageId}`, timestamp: new Date() }
+    ]);
+
+    try {
+      const res = await fetch(`/api/packages?id=${packageId}`);
+      if (!res.ok) throw new Error('Failed to fetch package details');
+      
+      const data = await res.json();
+      const pkg = data[0];
+
+      const formattedDetails = `
+🏝️ **${pkg.packageName}**  
+📅 **Duration**: ${pkg.noOfNight} Nights / ${pkg.noOfDays} Days  
+📍 **Destination**: ${pkg.destinationName}  
+💸 **Starting From**: ₹${pkg.startFrom.toLocaleString('en-IN')} per person  
+🎡 **Highlights**: ${pkg.planName}  
+💖 **Perfect For**: ${pkg.perfectFor}  
+🔖 **Package ID**: ${pkg.packageId}
+      `;
+
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: formattedDetails, timestamp: new Date() }
+      ]);
+
+    } catch (err) {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: 'Sorry, I couldn\'t fetch the details for that package.', timestamp: new Date() }
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Handle show more destinations
   const handleShowMoreDestinations = () => {
     setDestinationOffset(prev => prev + DESTINATIONS_PAGE_SIZE);
@@ -274,20 +413,24 @@ export default function ChatInterface() {
               </div>
             </div>
 
-            {/* Stats */}
-            <div className="hidden md:flex items-center gap-8 text-sm">
-              <div className="flex items-center gap-2 text-gray-600">
-                <Globe className="w-4 h-4 text-blue-500" />
-                <span className="font-medium">500+ Destinations</span>
-              </div>
-              <div className="flex items-center gap-2 text-gray-600">
-                <MapPin className="w-4 h-4 text-indigo-500" />
-                <span className="font-medium">Custom Itineraries</span>
-              </div>
-              <div className="flex items-center gap-2 text-gray-600">
-                <Heart className="w-4 h-4 text-pink-500" />
-                <span className="font-medium">Expert Curated</span>
-              </div>
+            {/* Stats & Actions */}
+            <div className="hidden md:flex items-center gap-6 text-sm">
+              <button 
+                onClick={handleStartOver}
+                className="flex items-center gap-2 text-gray-600 hover:text-indigo-600 transition-colors"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span className="font-medium">Start Over</span>
+              </button>
+              {['duration', 'plan', 'results'].includes(conversationStep) && (
+                <button 
+                  onClick={handleGoBack}
+                  className="flex items-center gap-2 text-gray-600 hover:text-indigo-600 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="font-medium">Go Back</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -384,6 +527,8 @@ export default function ChatInterface() {
                           price={pkg.startFrom}
                           hotels={pkg.hotels}
                           imageUrl={`https://images.unsplash.com/800x600/?travel,${(pkg.destinationName || pkg.startFrom || '').toLowerCase().replace(/\s+/g, ',')}`}
+                          onViewDetails={() => handleViewDetails(pkg.packageId)}
+                          packageId={pkg.packageId}
                         />
                       ))}
                     </div>
