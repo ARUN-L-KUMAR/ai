@@ -5,6 +5,7 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import WelcomeIntro from './WelcomeIntro';
 import { Bot, Sparkles, MapPin, Globe, Heart } from 'lucide-react';
+import TripCard from './TripCard';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -19,6 +20,26 @@ export default function ChatInterface() {
   const [showWelcome, setShowWelcome] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Add new state for destination selection
+  const [destinationOptions, setDestinationOptions] = useState<any[]>([]);
+  const [showDestinationOptions, setShowDestinationOptions] = useState(false);
+  const [destinationOffset, setDestinationOffset] = useState(0);
+  const DESTINATIONS_PAGE_SIZE = 5;
+
+  // Add new state for duration selection
+  const [durationOptions, setDurationOptions] = useState<number[]>([]);
+  const [showDurationOptions, setShowDurationOptions] = useState(false);
+  const [selectedDestination, setSelectedDestination] = useState<string | null>(null);
+
+  // Add new state for plan selection
+  const [planOptions, setPlanOptions] = useState<string[]>([]);
+  const [showPlanOptions, setShowPlanOptions] = useState(false);
+  const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
+
+  // Add new state for package results
+  const [packageResults, setPackageResults] = useState<any[]>([]);
+  const [showPackageResults, setShowPackageResults] = useState(false);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -32,9 +53,106 @@ export default function ChatInterface() {
     handleSendMessage(query);
   };
 
+  // Fetch destinations when user asks for packages
+  const fetchDestinations = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/destinations');
+      if (res.ok) {
+        const data = await res.json();
+        setDestinationOptions(data.destinations || []);
+        setShowDestinationOptions(true);
+        setDestinationOffset(DESTINATIONS_PAGE_SIZE);
+      } else {
+        setDestinationOptions([]);
+        setShowDestinationOptions(false);
+      }
+    } catch (err) {
+      setDestinationOptions([]);
+      setShowDestinationOptions(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch durations for a destination
+  const fetchDurations = async (destination: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/package-options?destination=${encodeURIComponent(destination)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setDurationOptions(data.durations || []);
+        setShowDurationOptions(true);
+      } else {
+        setDurationOptions([]);
+        setShowDurationOptions(false);
+      }
+    } catch (err) {
+      setDurationOptions([]);
+      setShowDurationOptions(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch plans for a destination and duration
+  const fetchPlans = async (destination: string, duration: number) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/package-options?destination=${encodeURIComponent(destination)}&duration=${duration}`);
+      if (res.ok) {
+        const data = await res.json();
+        let plans = data.plans || [];
+        setPlanOptions(plans);
+        setShowPlanOptions(true);
+      } else {
+        setPlanOptions([]);
+        setShowPlanOptions(false);
+      }
+    } catch (err) {
+      setPlanOptions([]);
+      setShowPlanOptions(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch packages based on all selections
+  const fetchFilteredPackages = async (destination: string, duration: number, plan: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/packages?destination=${encodeURIComponent(destination)}&duration=${duration}&plan=${encodeURIComponent(plan)}`);
+      let allPackages = [];
+      if (res.ok) {
+        allPackages = await res.json();
+      }
+      setPackageResults(allPackages);
+      setShowPackageResults(true);
+    } catch (err) {
+      setPackageResults([]);
+      setShowPackageResults(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Intercept package request and show destinations
   const handleSendMessage = async (content: string) => {
     if (showWelcome) {
       setShowWelcome(false);
+    }
+
+    // If user asks for packages, show destinations instead of sending to backend
+   if (/(show|see|suggest|want|give|looking|plan|planning|explore|find|search|recommend).*(package|trip|travel|plan|option|itinerary|place|vacation)s?/i.test(content)) {
+      const userMessage: Message = {
+        role: 'user',
+        content,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, userMessage]);
+      await fetchDestinations();
+      return;
     }
 
     const userMessage: Message = {
@@ -84,6 +202,47 @@ export default function ChatInterface() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Update handleSelectDestination to fetch durations
+  const handleSelectDestination = (destination: any) => {
+    setShowDestinationOptions(false);
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: destination.destinationName, timestamp: new Date() }
+    ]);
+    setSelectedDestination(destination.destinationName);
+    fetchDurations(destination.destinationName);
+  };
+
+  // Handle duration selection
+  const handleSelectDuration = (duration: number) => {
+    setShowDurationOptions(false);
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: `${duration} Days`, timestamp: new Date() }
+    ]);
+    setSelectedDuration(duration);
+    if (selectedDestination) {
+      fetchPlans(selectedDestination, duration);
+    }
+  };
+
+  // Handle plan selection and fetch packages
+  const handleSelectPlan = (plan: string) => {
+    setShowPlanOptions(false);
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: plan, timestamp: new Date() }
+    ]);
+    if (selectedDestination && selectedDuration) {
+      fetchFilteredPackages(selectedDestination, selectedDuration, plan);
+    }
+  };
+
+  // Handle show more destinations
+  const handleShowMoreDestinations = () => {
+    setDestinationOffset(prev => prev + DESTINATIONS_PAGE_SIZE);
   };
 
   return (
@@ -150,6 +309,89 @@ export default function ChatInterface() {
               {messages.map((message, index) => (
                 <ChatMessage key={index} message={message} index={index} />
               ))}
+              {/* Destination selection UI */}
+              {showDestinationOptions && destinationOptions.length > 0 && (
+                <div className="bg-white rounded-2xl p-6 shadow-lg border border-indigo-100 mt-4">
+                  <h3 className="text-lg font-semibold mb-4">Please choose the location you’d like to visit:</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                    {destinationOptions.slice(0, destinationOffset).map((dest, idx) => (
+                      <button
+                        key={dest.destinationName + idx}
+                        className="px-4 py-3 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-xl font-medium text-gray-800 hover:bg-indigo-200 transition"
+                        onClick={() => handleSelectDestination(dest)}
+                      >
+                        {dest.destinationName}
+                      </button>
+                    ))}
+                  </div>
+                  {destinationOffset < destinationOptions.length && (
+                    <button
+                      className="px-6 py-2 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition"
+                      onClick={handleShowMoreDestinations}
+                    >
+                      Show more
+                    </button>
+                  )}
+                </div>
+              )}
+              {/* Duration selection UI */}
+              {showDurationOptions && durationOptions.length > 0 && (
+                <div className="bg-white rounded-2xl p-6 shadow-lg border border-indigo-100 mt-4">
+                  <h3 className="text-lg font-semibold mb-4">How many days are you planning for this trip?</h3>
+                  <div className="flex flex-wrap gap-4 mb-4">
+                    {durationOptions.map((duration, idx) => (
+                      <button
+                        key={duration + '-' + idx}
+                        className="px-4 py-3 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-xl font-medium text-gray-800 hover:bg-indigo-200 transition"
+                        onClick={() => handleSelectDuration(duration)}
+                      >
+                        {duration} Days
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Plan selection UI */}
+              {showPlanOptions && planOptions.length > 0 && (
+                <div className="bg-white rounded-2xl p-6 shadow-lg border border-indigo-100 mt-4">
+                  <h3 className="text-lg font-semibold mb-4">What plan are you interested in?</h3>
+                  <div className="flex flex-wrap gap-4 mb-4">
+                    {planOptions.map((plan, idx) => (
+                      <button
+                        key={plan + '-' + idx}
+                        className="px-4 py-3 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-xl font-medium text-gray-800 hover:bg-indigo-200 transition"
+                        onClick={() => handleSelectPlan(plan)}
+                      >
+                        {plan}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Package results UI */}
+              {showPackageResults && (
+                <div className="bg-white rounded-2xl p-6 shadow-lg border border-indigo-100 mt-4">
+                  <h3 className="text-lg font-semibold mb-4">Available Packages</h3>
+                  {packageResults.length > 0 ? (
+                    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                      {packageResults.map((pkg, idx) => (
+                        <TripCard
+                          key={pkg._id || idx}
+                          name={pkg.packageName}
+                          destination={pkg.destinationName || pkg.startFrom}
+                          nights={pkg.noOfNight}
+                          days={pkg.noOfDays}
+                          price={pkg.startFrom}
+                          hotels={pkg.hotels}
+                          imageUrl={`https://images.unsplash.com/800x600/?travel,${(pkg.destinationName || pkg.startFrom || '').toLowerCase().replace(/\s+/g, ',')}`}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-gray-600">No packages found for your selection.</div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

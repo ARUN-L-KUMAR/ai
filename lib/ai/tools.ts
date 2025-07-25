@@ -196,7 +196,7 @@ async function getInterests(): Promise<any[]> {
   return data.result || [];
 }
 
-async function searchDestinations(search?: string): Promise<any[]> {
+export async function searchDestinations(search?: string): Promise<any[]> {
   const token = await getAccessToken();
   const url = search 
     ? `https://api.tripxplo.com/v1/api/admin/package/destination/search?search=${encodeURIComponent(search)}`

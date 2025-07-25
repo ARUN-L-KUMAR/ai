@@ -143,7 +143,7 @@ export default function WelcomeIntro({ onQuickStart }: WelcomeIntroProps) {
           <div>
             <h5 className="font-semibold text-amber-900 text-sm">Pro Tip</h5>
             <p className="text-amber-800 text-sm">
-              Try: "Show me 5-day packages under ₹25,000" or "Best time to visit Kashmir?"
+              Try: "Show Package" or "Best time to visit Kashmir?"
             </p>
           </div>
         </div>

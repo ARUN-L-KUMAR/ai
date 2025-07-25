@@ -6,23 +6,25 @@ import { useState } from 'react';
 interface TripCardProps {
   name: string;
   destination: string;
-  duration: string;
   price: number;
   hotels?: string;
   imageUrl?: string;
   rating?: number;
   reviews?: number;
+  nights?: number;
+  days?: number;
 }
 
 export default function TripCard({ 
   name, 
   destination, 
-  duration, 
   price, 
   hotels, 
   imageUrl,
   rating = 4.5,
-  reviews = 124
+  reviews = 124,
+  nights = 0,
+  days = 0
 }: TripCardProps) {
   const [isLiked, setIsLiked] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -48,16 +50,6 @@ export default function TripCard({
       maximumFractionDigits: 0,
     }).format(amount);
   };
-
-  const getDurationParts = (dur: string) => {
-    const match = dur.match(/(\d+).*?(\d+)/);
-    if (match) {
-      return { nights: match[1], days: match[2] };
-    }
-    return { nights: '6', days: '7' };
-  };
-
-  const { nights, days } = getDurationParts(duration);
 
   return (
     <div className="group relative bg-white rounded-3xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden border border-gray-100 animate-fadeIn">

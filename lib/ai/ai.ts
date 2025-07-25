@@ -7,10 +7,10 @@ interface Message {
 }
 
 interface ConversationState {
-  step: 'initial' | 'destination' | 'duration' | 'packageType' | 'complete';
+  step: 'initial' | 'destination' | 'duration' | 'plan' | 'complete';
   destination?: string;
   duration?: string;
-  packageType?: string;
+  plan?: string;
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -26,7 +26,7 @@ function extractConversationState(messages: Message[]): ConversationState {
     if (message.role === 'assistant') {
       // If last assistant message asked for package type
       if (message.content.includes('what type of package experience')) {
-        state.step = 'packageType';
+        state.step = 'plan';
         
         // Find destination and duration from the conversation
         const allMessages = messages.slice(0, i); // Messages before this question
@@ -171,7 +171,7 @@ function extractOptionsFromMessage(message: string, regex: RegExp): string[] {
 }
 
 // Helper to extract package type/interest from user input
-function extractPackageTypeFromContent(content: string): string | undefined {
+function extractPlanFromContent(content: string): string | undefined {
   const lower = content.toLowerCase();
   if (lower.includes('family')) return 'family';
   if (lower.includes('adventure')) return 'adventure';
@@ -197,9 +197,9 @@ export async function processWithai(messages: Message[]): Promise<string> {
   const state = extractConversationState(messages);
 
   // Extract package type/interest from initial user request if present
-  let initialPackageType = extractPackageTypeFromContent(userContent);
+  let initialPlan = extractPlanFromContent(userContent);
   // If not found in initial, check previous state
-  if (!initialPackageType && state.packageType) initialPackageType = state.packageType;
+  if (!initialPlan && state.plan) initialPlan = state.plan;
 
   console.log('🎯 Current conversation state:', state);
 
@@ -220,13 +220,13 @@ export async function processWithai(messages: Message[]): Promise<string> {
     // If the user changed the destination, reset the package type filter
     let prevDestination = state.destination ? state.destination.trim().toLowerCase() : '';
     let currDestination = destination.trim().toLowerCase();
-    let effectivePackageType = initialPackageType;
+    let effectivePlan = initialPlan;
     if (prevDestination && prevDestination !== currDestination) {
-      effectivePackageType = undefined;
+      effectivePlan = undefined;
     }
 
     let dynamicDurations = [];
-    let dynamicTypes = [];
+    let dynamicPlans = [];
     // Build absolute URL for server-side fetch
     const baseUrl =
       process.env.NEXT_PUBLIC_BASE_URL ||
@@ -234,14 +234,14 @@ export async function processWithai(messages: Message[]): Promise<string> {
     try {
       // Call the new API endpoint to get available durations and package types
       let url = `${baseUrl}/api/package-options?destination=${encodeURIComponent(destination)}`;
-      if (effectivePackageType) {
-        url += `&packageType=${encodeURIComponent(effectivePackageType)}`;
+      if (effectivePlan) {
+        url += `&plan=${encodeURIComponent(effectivePlan)}`;
       }
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         dynamicDurations = data.durations || [];
-        dynamicTypes = data.packageTypes || [];
+        dynamicPlans = data.plans || [];
       }
     } catch (err) {
       console.error('Failed to fetch dynamic options:', err);
@@ -253,8 +253,8 @@ export async function processWithai(messages: Message[]): Promise<string> {
       return `🎯 **Great choice!** ${destination} sounds amazing!\n\nHow many days are you planning for this trip?\n\n${durationOptions}\n✍️ **Other** (type your preferred duration)\n\n*Choose a number or tell me your ideal trip length!*`;
     } else {
       // No durations for this destination and type
-      let typeMsg = effectivePackageType ? ` for "${effectivePackageType}" packages` : '';
-      return `😕 Sorry, there are no available durations${typeMsg} in ${destination}.\n\nTry another type or destination!`;
+      let planMsg = effectivePlan ? ` for "${effectivePlan}" plans` : '';
+      return `😕 Sorry, there are no available durations${planMsg} in ${destination}.\n\nTry another type or destination!`;
     }
     // fallback to static options if dynamic not available (should not reach here)
   }
@@ -281,37 +281,37 @@ export async function processWithai(messages: Message[]): Promise<string> {
       selectedDuration = dynamicDurations[userIndex];
     }
 
-    let dynamicTypes: (string | number)[] = [];
+    let dynamicPlans: (string | number)[] = [];
     const baseUrl =
       process.env.NEXT_PUBLIC_BASE_URL ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     try {
       // Call the new API endpoint to get available package types for the destination and type
       let url = `${baseUrl}/api/package-options?destination=${encodeURIComponent(destination)}`;
-      if (initialPackageType) {
-        url += `&packageType=${encodeURIComponent(initialPackageType)}`;
+      if (initialPlan) {
+        url += `&plan=${encodeURIComponent(initialPlan)}`;
       }
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        dynamicTypes = data.packageTypes || [];
+        dynamicPlans = data.plans || [];
       }
     } catch (err) {
       console.error('Failed to fetch dynamic package types:', err);
     }
 
-    if (dynamicTypes.length > 0) {
+    if (dynamicPlans.length > 0) {
       // Build dynamic package type options
-      const typeOptions = dynamicTypes.map((t: string | number, i: number) => `🏷️ **${i + 1}.** ${t}`).join('\n');
-      return `⏰ **Perfect timing!** ${selectedDuration} days will be wonderful!\n\nNow, what type of package experience are you looking for?\n\n${typeOptions}\n✍️ **Custom** (tell me your preferences)\n\n*Almost there! Just pick your preferred package type.*`;
+      const planOptions = dynamicPlans.map((t: string | number, i: number) => `🏷️ **${i + 1}.** ${t}`).join('\n');
+      return `⏰ **Perfect timing!** ${selectedDuration} days will be wonderful!\n\nNow, what type of package experience are you looking for?\n\n${planOptions}\n✍️ **Custom** (tell me your preferences)\n\n*Almost there! Just pick your preferred package type.*`;
     }
     // fallback to static options if dynamic not available
     return `⏰ **Perfect timing!** ${selectedDuration} days will be wonderful!\n\nNow, what type of package experience are you looking for?\n\n🥇 **Gold** - Premium comfort & experiences\n🥈 **Silver** - Great value with quality amenities  \n🏆 **Premium** - Luxury & exclusive experiences\n✍️ **Custom** (tell me your preferences)\n\n*Almost there! Just pick your preferred package type.*`;
   }
 
   // Step 4: User selected package type - Now fetch packages
-  if (state.step === 'packageType') {
-    const packageTypeInput = lastUserMessage.content.trim();
+  if (state.step === 'plan') {
+    const planInput = lastUserMessage.content.trim();
     let destination = state.destination || '';
     let duration = state.duration || '';
     // Map numeric input to destination name
@@ -336,15 +336,15 @@ export async function processWithai(messages: Message[]): Promise<string> {
 
     // Extract dynamic package types from previous assistant message
     const typeRegex = /🏷️ \*\*\d+\.\*\* ([^\n]+)/g;
-    const dynamicTypes = extractOptionsFromMessage(prevAssistantMsg, typeRegex);
-    let selectedType = packageTypeInput;
-    const typeIndex = parseInt(packageTypeInput, 10) - 1;
-    if (!isNaN(typeIndex) && dynamicTypes[typeIndex] !== undefined) {
-      selectedType = dynamicTypes[typeIndex];
+    const dynamicPlans = extractOptionsFromMessage(prevAssistantMsg, typeRegex);
+    let selectedPlan = planInput;
+    const planIndex = parseInt(planInput, 10) - 1;
+    if (!isNaN(planIndex) && dynamicPlans[planIndex] !== undefined) {
+      selectedPlan = dynamicPlans[planIndex];
     }
 
     console.log(`🔍 Raw values - destination: "${destination}", duration: "${days}"`);
-    console.log(`🎪 Fetching packages for: ${destination}, ${days} days, ${selectedType}`);
+    console.log(`🎪 Fetching packages for: ${destination}, ${days} days, ${selectedPlan}`);
 
     try {
       // Try to get packages - first with exact search, then fallback to general search

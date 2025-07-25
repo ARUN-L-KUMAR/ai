@@ -72,7 +72,6 @@ export default function ChatMessage({ message, index }: ChatMessageProps) {
                 key={idx}
                 name={pkg.name}
                 destination={pkg.destination}
-                duration={pkg.duration}
                 price={parseInt(pkg.price)}
                 hotels={pkg.hotels}
                 imageUrl={`https://images.unsplash.com/800x600/?travel,${pkg.destination.toLowerCase().replace(/\s+/g, ',')}`}

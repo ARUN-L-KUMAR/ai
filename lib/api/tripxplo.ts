@@ -17,16 +17,28 @@ export async function getAccessToken(): Promise<string> {
     return cachedToken;
   }
 
+  const email = process.env.TRIPXPLO_EMAIL;
+  const password = process.env.TRIPXPLO_PASSWORD;
+  if (!email || !password) {
+    console.error('TRIPXPLO_EMAIL or TRIPXPLO_PASSWORD is missing in environment variables.');
+    throw new Error('TripXplo API credentials are missing.');
+  }
+
   const response = await fetch(LOGIN_ENDPOINT, {
     method: "PUT",
     headers: DEFAULT_HEADERS,
     body: JSON.stringify({
-      email: process.env.TRIPXPLO_EMAIL,
-      password: process.env.TRIPXPLO_PASSWORD,
+      email,
+      password,
     }),
   });
 
   if (!response.ok) {
+    console.error('TripXplo login failed:', {
+      status: response.status,
+      email,
+      password: password ? '***' : undefined
+    });
     throw new Error(`Login failed: ${response.status}`);
   }
 
