@@ -174,65 +174,39 @@ export class EnhancedAIProcessor {
     messages: Message[], 
     context: ConversationContext
   ): Promise<TripIntent> {
+    const startTime = Date.now();
+    
     try {
+      logger.info(LogCategory.AI, 'Starting enhanced intent analysis', {
+        messageCount: messages.length,
+        conversationId: context.id,
+      });
+
       const conversationHistory = messages.map(m => `${m.role}: ${m.content}`).join('\n');
       
-      const response = await openai.chat.completions.create({
-        messages: [{
-          role: 'system',
-          content: `You are an expert travel intent analyzer for TripXplo AI. Analyze the conversation and return structured JSON.
+      // Use enhanced prompt templates
+      const { systemPrompt, userPrompt } = generateIntentAnalysisPrompt(
+        conversationHistory,
+        context.userPreferences,
+        context.currentIntent
+      );
 
-🎯 **ENHANCED INTENT ANALYSIS:**
-
-Return a JSON object with this exact structure:
-{
-  "intent": "get_packages" | "ask_general" | "get_pricing" | "get_details" | "customize_package" | "unknown",
-  "destination": string | null,
-  "duration": number | null,
-  "planType": string | null,
-  "budget": {
-    "min": number | null,
-    "max": number | null,
-    "currency": "INR"
-  },
-  "travelers": {
-    "adults": number,
-    "children": number,
-    "rooms": number
-  },
-  "preferences": string[],
-  "urgency": "low" | "medium" | "high",
-  "confidence": number (0-1)
-}
-
-🧠 **INTENT CLASSIFICATION:**
-- "get_packages": User wants to find/book travel packages, tours, holidays
-- "get_details": User asks for specific package details by ID or name
-- "get_pricing": User wants pricing information for packages
-- "customize_package": User wants to modify/customize existing packages
-- "ask_general": General travel questions, advice, information
-- "unknown": Intent unclear or unrelated to travel
-
-📍 **EXTRACTION GUIDELINES:**
-- destination: Extract city/place names (e.g., "Goa", "Kashmir", "Manali")
-- duration: Extract days/nights (convert "4-day" to 4, "3 nights" to 3)  
-- planType: Trip type ("honeymoon", "family", "adventure", "romantic", "business")
-- budget: Extract budget ranges in Indian Rupees
-- travelers: Default to 1 adult, 0 children, 1 room if not specified
-- preferences: Array of interests/requirements mentioned
-- urgency: Assess based on language used (urgent words = high)
-- confidence: Rate your confidence in the analysis (0.0 to 1.0)
-
-Return ONLY the JSON object, no additional text.`
-        }, {
-          role: 'user',
-          content: `Analyze this conversation:\n\n${conversationHistory}`
-        }],
-        model: aiConfig.model,
-        temperature: 0.1,
-        max_tokens: 400,
-        timeout: aiConfig.timeout,
-      });
+      const response = await retryAIOperation(
+        async () => {
+          return await openai.chat.completions.create({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            model: aiConfig.model,
+            temperature: 0.1,
+            max_tokens: 600,
+            timeout: aiConfig.timeout,
+          });
+        },
+        'intent_analysis',
+        { maxAttempts: 2 }
+      );
 
       const content = response.choices?.[0]?.message?.content?.trim();
       if (!content) {
@@ -243,10 +217,36 @@ Return ONLY the JSON object, no additional text.`
       const parsed = JSON.parse(content);
       const validatedIntent = validateTripIntent(parsed);
       
+      const duration = Date.now() - startTime;
+      logger.logAIInteraction(
+        'intent_analysis',
+        duration,
+        true,
+        context.userId,
+        context.sessionId,
+        context.id,
+        { confidence: validatedIntent.confidence }
+      );
+
       return validatedIntent;
 
     } catch (error) {
-      console.error('🔍 Intent analysis error:', error);
+      const duration = Date.now() - startTime;
+      logger.error(LogCategory.AI, 'Intent analysis failed', error as Error, {
+        conversationId: context.id,
+        messageCount: messages.length,
+        duration,
+      });
+      
+      logger.logAIInteraction(
+        'intent_analysis',
+        duration,
+        false,
+        context.userId,
+        context.sessionId,
+        context.id,
+        { error: (error as Error).message }
+      );
       
       // Create enhanced error for intent analysis failure
       const enhancedError = createValidationError(
