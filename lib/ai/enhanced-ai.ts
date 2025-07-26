@@ -1,4 +1,4 @@
-// Enhanced AI System - Integrating Phase 1 improvements with GPT-4o
+// Enhanced AI System - Integrating Phase 1 Final improvements with GPT-4o
 import OpenAI from "openai";
 import { 
   Message, 
@@ -18,6 +18,15 @@ import {
   ErrorSeverity 
 } from '../error-handling/enhanced-error-handler';
 import { toolMiddleware } from '../middleware/tool-middleware';
+import { logger, LogCategory } from '../logging/comprehensive-logger';
+import { retryAIOperation } from '../error-handling/advanced-retry-mechanisms';
+import { 
+  generateIntentAnalysisPrompt,
+  generatePackageRecommendationPrompt,
+  generateGeneralQueryPrompt,
+  generateFollowUpQuestionPrompt 
+} from '../prompts/enhanced-prompt-templates';
+import { executeEnhancedTool } from '../tools/enhanced-tool-integration';
 
 // Enhanced OpenAI client with better configuration
 const openai = new OpenAI({ 
