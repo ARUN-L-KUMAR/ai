@@ -493,7 +493,6 @@ export class EnhancedAIProcessor {
             model: aiConfig.model,
             temperature: 0.7,
             max_tokens: 200,
-            timeout: aiConfig.timeout,
           });
         },
         'follow_up_question',
