@@ -465,8 +465,84 @@ export class EnhancedAIProcessor {
     missingInfo: string[], 
     context: ConversationContext
   ): Promise<string> {
-    // Enhanced follow-up question generation with context awareness
-    return "Enhanced follow-up questions will be implemented shortly.";
+    const startTime = Date.now();
+    
+    try {
+      logger.info(LogCategory.AI, 'Generating follow-up question', {
+        missingInfo,
+        conversationId: context.id,
+      });
+
+      const conversationHistory = context.messages.map(m => `${m.role}: ${m.content}`).join('\n');
+      
+      // Use enhanced prompt templates
+      const { systemPrompt, userPrompt } = generateFollowUpQuestionPrompt(
+        intent,
+        missingInfo,
+        conversationHistory,
+        { userPersonality: 'professional' }
+      );
+
+      const response = await retryAIOperation(
+        async () => {
+          return await openai.chat.completions.create({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            model: aiConfig.model,
+            temperature: 0.7,
+            max_tokens: 200,
+            timeout: aiConfig.timeout,
+          });
+        },
+        'follow_up_question',
+        { maxAttempts: 2 }
+      );
+
+      const question = response.choices?.[0]?.message?.content?.trim() || 
+        "I'd love to help you find the perfect trip! Could you tell me more about what you're looking for? 🌍";
+
+      const duration = Date.now() - startTime;
+      logger.logAIInteraction(
+        'follow_up_question',
+        duration,
+        true,
+        context.userId,
+        context.sessionId,
+        context.id,
+        { missingInfoCount: missingInfo.length }
+      );
+
+      return question;
+      
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logger.error(LogCategory.AI, 'Follow-up question generation failed', error as Error, {
+        conversationId: context.id,
+        missingInfo,
+        duration,
+      });
+      
+      logger.logAIInteraction(
+        'follow_up_question',
+        duration,
+        false,
+        context.userId,
+        context.sessionId,
+        context.id,
+        { error: (error as Error).message }
+      );
+      
+      // Fallback questions based on missing info
+      if (missingInfo.includes('destination')) {
+        return "I'd love to help you find the perfect trip! 🌍 Where would you like to go?";
+      } else if (missingInfo.includes('duration')) {
+        return `Great choice! ${intent.destination} sounds amazing! 🎯 How many days are you planning for this trip?`;
+      }
+      
+      return "I'd love to help you find the perfect trip! Could you tell me more about what you're looking for? 🌍";
+    }
   }
 
   private async generateNoPackagesResponseEnhanced(
@@ -488,8 +564,114 @@ export class EnhancedAIProcessor {
     planType: string | null,
     context: ConversationContext
   ): Promise<string> {
-    // Enhanced package formatting with better presentation
-    return "Enhanced package formatting will be implemented shortly.";
+    const startTime = Date.now();
+    
+    try {
+      logger.info(LogCategory.AI, 'Formatting packages response', {
+        packageCount: Array.isArray(packages) ? packages.length : 0,
+        destination,
+        duration,
+        conversationId: context.id,
+      });
+
+      // Extract packages data - handle both array and object with packages property
+      const packageList = Array.isArray(packages) ? packages : packages.packages || [];
+      
+      if (packageList.length === 0) {
+        return await this.generateNoPackagesResponseEnhanced(destination, duration, planType, context);
+      }
+
+      // Use enhanced prompt templates for formatting
+      const { systemPrompt, userPrompt } = generatePackageRecommendationPrompt(
+        {
+          intent: 'get_packages',
+          destination,
+          duration,
+          planType,
+          budget: { min: null, max: null, currency: 'INR' },
+          travelers: { adults: 1, children: 0, rooms: 1 },
+          preferences: [],
+          urgency: 'medium',
+          confidence: 0.8,
+        },
+        packageList.slice(0, 5), // Top 5 packages
+        { userPersonality: 'professional' }
+      );
+
+      const response = await retryAIOperation(
+        async () => {
+          return await openai.chat.completions.create({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            model: aiConfig.model,
+            temperature: 0.6,
+            max_tokens: 800,
+            timeout: aiConfig.timeout,
+          });
+        },
+        'package_formatting',
+        { maxAttempts: 2 }
+      );
+
+      const formattedResponse = response.choices?.[0]?.message?.content;
+      
+      const duration_ms = Date.now() - startTime;
+      logger.logAIInteraction(
+        'package_formatting',
+        duration_ms,
+        true,
+        context.userId,
+        context.sessionId,
+        context.id,
+        { 
+          packageCount: packageList.length,
+          responseLength: formattedResponse?.length || 0 
+        }
+      );
+
+      return formattedResponse || this.getFallbackPackageResponse(packageList, destination, duration);
+      
+    } catch (error) {
+      const duration_ms = Date.now() - startTime;
+      logger.error(LogCategory.AI, 'Package formatting failed', error as Error, {
+        conversationId: context.id,
+        packageCount: Array.isArray(packages) ? packages.length : 0,
+        duration: duration_ms,
+      });
+      
+      logger.logAIInteraction(
+        'package_formatting',
+        duration_ms,
+        false,
+        context.userId,
+        context.sessionId,
+        context.id,
+        { error: (error as Error).message }
+      );
+
+      // Return fallback formatting
+      const packageList = Array.isArray(packages) ? packages : packages.packages || [];
+      return this.getFallbackPackageResponse(packageList, destination, duration);
+    }
+  }
+
+  private getFallbackPackageResponse(packages: any[], destination: string | null, duration: number | null): string {
+    const packageCount = packages.length;
+    const topPackages = packages.slice(0, 3);
+    
+    let response = `✨ Found ${packageCount} packages for your ${duration}-day trip to ${destination}!\n\n`;
+    
+    topPackages.forEach((pkg, index) => {
+      response += `🌍 **${pkg.packageName || pkg.name}**\n`;
+      response += `📅 ${pkg.noOfDays || pkg.days} Days / ${pkg.noOfNight || pkg.nights} Nights\n`;
+      response += `💸 Starting From: ₹${pkg.startFrom}\n`;
+      if (pkg.packageId) response += `🔖 Package ID: ${pkg.packageId}\n`;
+      if (index < topPackages.length - 1) response += '\n';
+    });
+    
+    return response;
   }
 
   // Context management
