@@ -359,49 +359,53 @@ export class EnhancedAIProcessor {
     messages: Message[], 
     context: ConversationContext
   ): Promise<string> {
+    const startTime = Date.now();
+    
     try {
-      console.log('🤖 Processing enhanced general travel query...');
-      
-      const response = await openai.chat.completions.create({
-        messages: [{
-          role: 'system',
-          content: `You are TripXplo AI, a professional travel consultant with enhanced capabilities.
-
-🎯 **YOUR ENHANCED ROLE:**
-- Friendly, knowledgeable travel expert with contextual awareness
-- Provide helpful travel information and personalized guidance
-- Answer questions about destinations, travel tips, and general travel advice
-- Guide users through our intelligent conversation flow
-- Maintain conversation context and build rapport
-
-🧠 **ENHANCED RESPONSE GUIDELINES:**
-- Keep responses concise and helpful (under 350 words)
-- Use emojis strategically to enhance readability
-- Provide actionable, personalized travel advice
-- Reference previous conversation context when relevant
-- For package requests, guide users through our smart conversation flow
-- Maintain TripXplo brand voice - professional yet friendly
-
-🎪 **CONTEXTUAL AWARENESS:**
-- Remember what the user has already shared
-- Build on previous interactions naturally
-- Offer relevant follow-up suggestions
-- Personalize recommendations based on conversation history
-
-🌟 **SPECIAL CAPABILITIES:**
-- If users ask about "packages", "tours", "trips" - encourage them to share preferences
-- For destination questions, provide insights but suggest our package finder
-- Always maintain helpful, solution-oriented responses
-- End responses naturally without being pushy`
-        }, ...messages],
-        model: aiConfig.model,
-        temperature: 0.6,
-        max_tokens: 600,
-        timeout: aiConfig.timeout,
+      logger.info(LogCategory.AI, 'Processing general travel query', {
+        conversationId: context.id,
+        messageCount: messages.length,
       });
+      
+      const conversationHistory = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+      const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+      
+      // Use enhanced prompt templates
+      const { systemPrompt, userPrompt } = generateGeneralQueryPrompt(
+        lastUserMessage?.content || '',
+        conversationHistory,
+        context.userPreferences
+      );
+
+      const response = await retryAIOperation(
+        async () => {
+          return await openai.chat.completions.create({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            model: aiConfig.model,
+            temperature: 0.6,
+            max_tokens: 600,
+            timeout: aiConfig.timeout,
+          });
+        },
+        'general_query',
+        { maxAttempts: 2 }
+      );
 
       const messageContent = response.choices?.[0]?.message?.content ?? "";
-      console.log('📤 Enhanced AI Response generated');
+      
+      const duration = Date.now() - startTime;
+      logger.logAIInteraction(
+        'general_query',
+        duration,
+        true,
+        context.userId,
+        context.sessionId,
+        context.id,
+        { messageLength: messageContent.length }
+      );
 
       if (!messageContent) {
         return this.getWelcomeMessage();
@@ -410,8 +414,23 @@ export class EnhancedAIProcessor {
       return messageContent;
 
     } catch (error) {
-      console.error('💥 Enhanced general query error:', error);
+      const duration = Date.now() - startTime;
+      logger.error(LogCategory.AI, 'General query processing failed', error as Error, {
+        conversationId: context.id,
+        sessionId: context.sessionId,
+        duration,
+      });
       
+      logger.logAIInteraction(
+        'general_query',
+        duration,
+        false,
+        context.userId,
+        context.sessionId,
+        context.id,
+        { error: (error as Error).message }
+      );
+
       const enhancedError = createAPIError(
         `General query processing failed: ${error instanceof Error ? error.message : String(error)}`,
         {
