@@ -281,8 +281,17 @@ export class EnhancedAIProcessor {
     intent: TripIntent, 
     context: ConversationContext
   ): Promise<string> {
+    const startTime = Date.now();
+    
     try {
       const { destination, duration, planType } = intent;
+      
+      logger.info(LogCategory.AI, 'Processing package request', {
+        destination,
+        duration,
+        planType,
+        conversationId: context.id,
+      });
       
       // Check what information we have and what we need
       const missingInfo = [];
@@ -291,38 +300,41 @@ export class EnhancedAIProcessor {
       
       // If we have all required info, fetch packages
       if (missingInfo.length === 0) {
-        console.log(`🎪 Fetching packages for: ${destination}, ${duration} days, ${planType || 'any'}`);
+        logger.info(LogCategory.TOOL, `Fetching packages for: ${destination}, ${duration} days, ${planType || 'any'}`);
         
-        const toolContext = toolMiddleware.getContext(context.sessionId, context.id);
-        
-        // Use tool middleware for API call
-        const packages = await toolMiddleware.executeToolWithMiddleware(
+        // Use enhanced tool execution
+        const toolResult = await executeEnhancedTool(
           'get_packages',
           { 
             search: destination,
             days: duration 
           },
-          toolContext,
-          async (toolName, args) => {
-            // Import executeTool dynamically to avoid circular dependency
-            const { executeTool } = await import('./tools');
-            return executeTool(toolName, args);
+          {
+            sessionId: context.sessionId,
+            userId: context.userId,
+            priority: intent.urgency === 'high' ? 'high' : 'medium'
           }
         );
         
-        if (!packages || packages.length === 0) {
+        if (!toolResult.success || !toolResult.data || toolResult.data.length === 0) {
           return await this.generateNoPackagesResponseEnhanced(destination, duration, planType, context);
         }
         
-        return await this.formatPackagesResponseEnhanced(packages, destination, duration, planType, context);
+        return await this.formatPackagesResponseEnhanced(toolResult.data, destination, duration, planType, context);
       }
       
       // Generate natural follow-up questions for missing information
       return await this.generateFollowUpQuestionEnhanced(intent, missingInfo, context);
 
     } catch (error) {
-      console.error('💥 Package request error:', error);
-      
+      const duration = Date.now() - startTime;
+      logger.error(LogCategory.AI, 'Package request failed', error as Error, {
+        conversationId: context.id,
+        sessionId: context.sessionId,
+        intent: intent,
+        duration,
+      });
+
       const enhancedError = createAPIError(
         `Package request failed: ${error instanceof Error ? error.message : String(error)}`,
         {
